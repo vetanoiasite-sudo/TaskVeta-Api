@@ -23,4 +23,34 @@
     <ProjectReference Include="..\CompanyManagement.Infrastructure\CompanyManagement.Infrastructure.csproj" />
   </ItemGroup>
 
+  <!--
+    Angular SPA hosted from wwwroot (single origin: the API serves both the app and /api).
+    The Angular build writes straight into wwwroot (frontend/angular.json → outputPath), so wwwroot is
+    excluded from the SDK's static-web-assets pipeline and handled here instead:
+      - dotnet publish / Visual Studio Publish: builds Angular (production) and copies it into the publish folder.
+      - Day-to-day: `npm run build` (or `npm run watch`) in frontend/, then F5 serves it at http://localhost:5109.
+    Skip the Angular step with -p:SkipSpaBuild=true (e.g. when the SPA was already built by CI).
+  -->
+  <PropertyGroup>
+    <SpaRoot>$(MSBuildProjectDirectory)\..\..\..\frontend\</SpaRoot>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Remove="wwwroot\**" />
+    <None Include="wwwroot\**" Exclude="wwwroot\**\*.map" CopyToOutputDirectory="Never" CopyToPublishDirectory="Never" />
+  </ItemGroup>
+
+  <Target Name="PublishAngularSpa" AfterTargets="Publish" Condition="'$(SkipSpaBuild)' != 'true'">
+    <Message Importance="high" Text="Building Angular SPA into wwwroot..." />
+    <Exec Command="npm ci" WorkingDirectory="$(SpaRoot)" Condition="!Exists('$(SpaRoot)node_modules')" />
+    <Exec Command="npx ng build --configuration production" WorkingDirectory="$(SpaRoot)" />
+    <ItemGroup>
+      <SpaFiles Include="$(MSBuildProjectDirectory)\wwwroot\**\*" />
+    </ItemGroup>
+    <Error Condition="!Exists('$(MSBuildProjectDirectory)\wwwroot\index.html')" Text="Angular build did not produce wwwroot\index.html." />
+    <RemoveDir Directories="$(PublishDir)wwwroot" />
+    <Copy SourceFiles="@(SpaFiles)" DestinationFiles="@(SpaFiles->'$(PublishDir)wwwroot\%(RecursiveDir)%(Filename)%(Extension)')" />
+    <Message Importance="high" Text="Angular SPA copied to $(PublishDir)wwwroot" />
+  </Target>
+
 </Project>

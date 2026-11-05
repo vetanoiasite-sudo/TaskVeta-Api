@@ -90,3 +90,16 @@ public static class ExportResults
         };
     }
 }
+
+/// <summary>Cache headers for the Angular files served from wwwroot.</summary>
+public static partial class SpaCaching
+{
+    // Angular output names look like main-ABCD1234.js / chunk-ABCD1234.js / styles-ABCD1234.css.
+    [System.Text.RegularExpressions.GeneratedRegex(@"-[A-Z0-9]{8}\.(js|css|mjs)$")]
+    private static partial System.Text.RegularExpressions.Regex HashedFile();
+
+    public static void Apply(HttpContext context, string fileName) =>
+        context.Response.Headers.CacheControl = HashedFile().IsMatch(fileName)
+            ? "public, max-age=31536000, immutable"
+            : "no-cache";
+}

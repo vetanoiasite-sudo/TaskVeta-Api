@@ -146,9 +146,11 @@ try
     }
     if (app.Configuration.GetValue("Https:Redirect", false)) app.UseHttpsRedirection();
 
-    // Optionally serve the built Angular app from wwwroot (single-origin deployment).
+    // Angular SPA built into wwwroot (single-origin deployment). Hashed bundles are cached for a year;
+    // index.html, translations and other unhashed files are revalidated so a new deployment shows up immediately.
+    var spaFiles = new StaticFileOptions { OnPrepareResponse = ctx => SpaCaching.Apply(ctx.Context, ctx.File.Name) };
     app.UseDefaultFiles();
-    app.UseStaticFiles();
+    app.UseStaticFiles(spaFiles);
 
     app.UseCors();
     app.UseAuthentication();
@@ -158,7 +160,8 @@ try
     app.MapControllers();
     app.MapHub<NotificationHub>(NotificationHub.Path);
     app.MapHealthChecks("/health").AllowAnonymous();
-    app.MapFallbackToFile("index.html").AllowAnonymous();
+    app.MapFallback("/api/{**path}", () => Results.NotFound()).AllowAnonymous(); // unknown API routes are 404, not the SPA
+    app.MapFallbackToFile("index.html", spaFiles).AllowAnonymous();
 
     // One-time bootstrap for an empty database: dotnet run -- create-admin
     if (args.Contains("create-admin", StringComparer.OrdinalIgnoreCase))

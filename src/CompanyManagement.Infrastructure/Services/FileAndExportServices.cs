@@ -101,7 +101,7 @@ public class ExportService : IExportService
             {
                 page.Size(columns.Count > 6 ? PageSizes.A4.Landscape() : PageSizes.A4);
                 page.Margin(24);
-                page.DefaultTextStyle(t => t.FontSize(8.5f).FontFamily(Fonts.Lato));
+                page.DefaultTextStyle(t => t.FontSize(8.5f).FontFamily("Lato"));
                 page.Header().Column(col =>
                 {
                     col.Item().Text(title).FontSize(15).Bold().FontColor("#1F3A5F");

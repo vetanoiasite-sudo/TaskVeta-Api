@@ -160,6 +160,13 @@ try
     app.MapHealthChecks("/health").AllowAnonymous();
     app.MapFallbackToFile("index.html").AllowAnonymous();
 
+    // One-time bootstrap for an empty database: dotnet run -- create-admin
+    if (args.Contains("create-admin", StringComparer.OrdinalIgnoreCase))
+    {
+        Environment.ExitCode = await DatabaseSeeder.CreateAdminInteractiveAsync(app.Services);
+        return;
+    }
+
     await DatabaseSeeder.RunAsync(app.Services);
     await app.RunAsync();
 }

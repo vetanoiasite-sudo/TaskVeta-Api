@@ -201,8 +201,8 @@ public class ReportsController(IReportService reports, IExportService export, IC
 
 [ApiController]
 [Route("api/dashboard")]
-public class DashboardController(IAttendanceService attendance, ITaskService tasks, IReportService reports, ICurrentUser user, ICompanyClock clock)
-    : ControllerBase
+public class DashboardController(IAttendanceService attendance, ITaskService tasks, IReportService reports, ICurrentUser user, ICompanyClock clock,
+    IAccessScope scope) : ControllerBase
 {
     public record DashboardDto(DailySummaryDto? Attendance, TaskDashboardDto Tasks, IReadOnlyList<DailyTrendPointDto> Trend, MyAttendanceStatusDto? Me);
 
@@ -219,7 +219,8 @@ public class DashboardController(IAttendanceService attendance, ITaskService tas
             trend = (await reports.AttendanceAsync(new ReportQuery { From = today.AddDays(-13), To = today }, ct)).Trend;
         }
         MyAttendanceStatusDto? me = null;
-        try { me = await attendance.GetMyStatusAsync(ct); } catch (BadRequestException) { /* user not linked to an employee */ }
+        // Accounts without an employee profile (e.g. a pure Super Admin) have no personal attendance card.
+        if (await scope.GetCurrentEmployeeIdAsync(ct) is not null) me = await attendance.GetMyStatusAsync(ct);
         var taskStats = await tasks.GetDashboardAsync(!user.HasPermission(Permissions.TasksAssign), ct);
         return Ok(new DashboardDto(summary, taskStats, trend, me));
     }

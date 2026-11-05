@@ -40,7 +40,8 @@ public class AttendanceRecord : BaseEntity
     public bool IsManuallyEdited { get; set; }
     public int? LastEditedByUserId { get; set; }
 
-    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
+    /// <summary>Optimistic-concurrency token (PostgreSQL system column <c>xmin</c>).</summary>
+    public uint RowVersion { get; set; }
 }
 
 public class WorkSchedule : BaseEntity

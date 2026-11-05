@@ -46,6 +46,7 @@ public class CompanyClock(TimeProvider time, IServiceProvider services, IMemoryC
         var db = scope.ServiceProvider.GetService<AppDbContext>();
         var id = db is null ? null : await db.CompanySettings.AsNoTracking().OrderBy(s => s.Id).Select(s => s.TimeZoneId).FirstOrDefaultAsync(ct);
         tz = id is not null && TimeZoneInfo.TryFindSystemTimeZoneById(id, out var found) ? found : TimeZoneInfo.Local;
+        CompanyTimeZone.Current = tz; // used when reading attendance times from the database
         cache.Set(CacheKey, tz, TimeSpan.FromMinutes(10));
         return tz;
     }

@@ -239,7 +239,10 @@ public class LeaveService(
         if (q.From is DateOnly f) query = query.Where(l => l.EndDate >= f);
         if (q.To is DateOnly t) query = query.Where(l => l.StartDate <= t);
         if (!string.IsNullOrWhiteSpace(q.Search))
-            query = query.Where(l => (l.Employee.FirstName + " " + l.Employee.LastName).Contains(q.Search) || l.Employee.EmployeeCode.Contains(q.Search));
+        {
+            var term = q.Search.Trim().ToLower();
+            query = query.Where(l => (l.Employee.FirstName + " " + l.Employee.LastName).ToLower().Contains(term) || l.Employee.EmployeeCode.ToLower().Contains(term));
+        }
         return await Project(query.OrderByDescending(l => l.CreatedAt)).ToPagedAsync(q, ct);
     }
 

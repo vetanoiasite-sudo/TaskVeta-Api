@@ -22,10 +22,11 @@ public static class DependencyInjection
         services.AddMemoryCache();
         services.AddHttpContextAccessor();
 
-        services.AddDbContext<AppDbContext>(o => o.UseSqlServer(connectionString, sql =>
+        services.AddDbContext<AppDbContext>(o => o.UseNpgsql(connectionString, npg =>
         {
-            sql.MigrationsAssembly(typeof(AppDbContext).Assembly.FullName);
-            sql.UseQuerySplittingBehavior(QuerySplittingBehavior.SingleQuery);
+            npg.MigrationsAssembly(typeof(AppDbContext).Assembly.FullName);
+            npg.UseQuerySplittingBehavior(QuerySplittingBehavior.SingleQuery);
+            npg.EnableRetryOnFailure(maxRetryCount: 3);
         }));
         services.AddScoped<IApplicationDbContext>(sp => sp.GetRequiredService<AppDbContext>());
 

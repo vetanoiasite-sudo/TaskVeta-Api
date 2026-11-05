@@ -33,7 +33,10 @@ public class AuditQueryService(IApplicationDbContext db) : IAuditQueryService
         if (q.From is DateTime f) query = query.Where(a => a.CreatedAt >= f);
         if (q.To is DateTime t) query = query.Where(a => a.CreatedAt <= t);
         if (!string.IsNullOrWhiteSpace(q.Search))
-            query = query.Where(a => a.UserName!.Contains(q.Search) || a.Action.Contains(q.Search) || a.EntityName.Contains(q.Search) || a.Reason!.Contains(q.Search));
+        {
+            var s = q.Search.Trim().ToLower();
+            query = query.Where(a => a.UserName!.ToLower().Contains(s) || a.Action.ToLower().Contains(s) || a.EntityName.ToLower().Contains(s) || a.Reason!.ToLower().Contains(s));
+        }
         return await query.OrderByDescending(a => a.Id)
             .Select(a => new AuditLogDto(a.Id, a.UserId, a.UserName, a.Action, a.EntityName, a.EntityId, a.OldValues, a.NewValues, a.Reason, a.IpAddress, a.CreatedAt))
             .ToPagedAsync(q, ct);

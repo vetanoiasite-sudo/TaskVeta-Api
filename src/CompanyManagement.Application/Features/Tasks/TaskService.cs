@@ -133,8 +133,8 @@ public class TaskService(
         if (q.DueTo is DateTime dt) query = query.Where(t => t.DueDate <= dt);
         if (!string.IsNullOrWhiteSpace(q.Search))
         {
-            var term = q.Search.Trim();
-            query = query.Where(t => t.Title.Contains(term) || (t.Description != null && t.Description.Contains(term)));
+            var term = q.Search.Trim().ToLower();
+            query = query.Where(t => t.Title.ToLower().Contains(term) || (t.Description != null && t.Description.ToLower().Contains(term)));
         }
         return query;
     }
@@ -154,7 +154,7 @@ public class TaskService(
         var assignee = await IsAssigneeAsync(task, ct);
         var allowed = Enum.GetValues<TaskItemStatus>().Where(s => TaskWorkflow.CanTransition(task.Status, s, reviewer, assignee)).ToArray();
         var perms = new TaskPermissionsDto(reviewer, reviewer, (assignee || reviewer) && !task.IsClosed, true, allowed);
-        return new TaskDetailsDto(dto, task.Description, task.ReviewNotes, comments, attachments, perms, Convert.ToBase64String(task.RowVersion));
+        return new TaskDetailsDto(dto, task.Description, task.ReviewNotes, comments, attachments, perms, task.RowVersion.ToString());
     }
 
     // ------------------------------------------------------------------ commands
@@ -192,7 +192,7 @@ public class TaskService(
     {
         var task = await LoadVisibleAsync(id, ct);
         if (!await IsReviewerAsync(task, ct)) throw new ForbiddenException("You cannot edit this task.");
-        if (!string.IsNullOrEmpty(r.RowVersion) && Convert.ToBase64String(task.RowVersion) != r.RowVersion)
+        if (!string.IsNullOrEmpty(r.RowVersion) && task.RowVersion.ToString() != r.RowVersion)
             throw new ConflictException("The task was modified by someone else. Reload and try again.");
 
         var assignees = await ValidateAssigneesAsync(r.AssigneeEmployeeIds, ct);

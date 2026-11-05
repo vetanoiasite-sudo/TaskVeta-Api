@@ -30,7 +30,8 @@ public class TaskItem : BaseEntity
     public DateTime? DeadlineReminderSentAt { get; set; }
     public DateTime? OverdueNotifiedAt { get; set; }
 
-    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
+    /// <summary>Optimistic-concurrency token (PostgreSQL system column <c>xmin</c>).</summary>
+    public uint RowVersion { get; set; }
 
     public ICollection<TaskAssignment> Assignments { get; set; } = new List<TaskAssignment>();
     public ICollection<TaskComment> Comments { get; set; } = new List<TaskComment>();

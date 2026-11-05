@@ -219,14 +219,14 @@ public class AttendanceService(
         if (q.EmployeeId is int emp) query = query.Where(a => a.EmployeeId == emp);
         if (!string.IsNullOrWhiteSpace(q.EmployeeName))
         {
-            var n = q.EmployeeName.Trim();
-            query = query.Where(a => (a.Employee.FirstName + " " + a.Employee.LastName).Contains(n));
+            var n = q.EmployeeName.Trim().ToLower();
+            query = query.Where(a => (a.Employee.FirstName + " " + a.Employee.LastName).ToLower().Contains(n));
         }
-        if (!string.IsNullOrWhiteSpace(q.EmployeeCode)) query = query.Where(a => a.Employee.EmployeeCode.Contains(q.EmployeeCode.Trim()));
+        if (!string.IsNullOrWhiteSpace(q.EmployeeCode)) { var code = q.EmployeeCode.Trim().ToLower(); query = query.Where(a => a.Employee.EmployeeCode.ToLower().Contains(code)); }
         if (!string.IsNullOrWhiteSpace(q.Search))
         {
-            var s = q.Search.Trim();
-            query = query.Where(a => (a.Employee.FirstName + " " + a.Employee.LastName).Contains(s) || a.Employee.EmployeeCode.Contains(s));
+            var s = q.Search.Trim().ToLower();
+            query = query.Where(a => (a.Employee.FirstName + " " + a.Employee.LastName).ToLower().Contains(s) || a.Employee.EmployeeCode.ToLower().Contains(s));
         }
         if (q.DepartmentId is int d) query = query.Where(a => a.Employee.DepartmentId == d);
         if (q.TeamId is int team) query = query.Where(a => a.Employee.TeamMemberships.Any(m => m.TeamId == team));
@@ -381,9 +381,12 @@ public class AttendanceService(
         if (q.EmployeeId is int empId) employeesQuery = employeesQuery.Where(e => e.Id == empId);
         if (q.DepartmentId is int d) employeesQuery = employeesQuery.Where(e => e.DepartmentId == d);
         if (q.TeamId is int t) employeesQuery = employeesQuery.Where(e => e.TeamMemberships.Any(m => m.TeamId == t));
-        if (!string.IsNullOrWhiteSpace(q.EmployeeCode)) employeesQuery = employeesQuery.Where(e => e.EmployeeCode.Contains(q.EmployeeCode.Trim()));
+        if (!string.IsNullOrWhiteSpace(q.EmployeeCode)) { var code = q.EmployeeCode.Trim().ToLower(); employeesQuery = employeesQuery.Where(e => e.EmployeeCode.ToLower().Contains(code)); }
         if (!string.IsNullOrWhiteSpace(q.Search))
-            employeesQuery = employeesQuery.Where(e => (e.FirstName + " " + e.LastName).Contains(q.Search.Trim()) || e.EmployeeCode.Contains(q.Search.Trim()));
+        {
+            var s = q.Search.Trim().ToLower();
+            employeesQuery = employeesQuery.Where(e => (e.FirstName + " " + e.LastName).ToLower().Contains(s) || e.EmployeeCode.ToLower().Contains(s));
+        }
 
         var employees = await SlimAsync(employeesQuery, ct);
         var ids = employees.Select(e => e.Id).ToList();

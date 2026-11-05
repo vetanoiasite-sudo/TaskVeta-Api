@@ -125,7 +125,7 @@ public class EmployeeConfiguration : IEntityTypeConfiguration<Employee>
         b.Property(e => e.JobTitle).HasMaxLength(100);
         b.HasIndex(e => e.EmployeeCode).IsUnique();
         b.HasIndex(e => e.Email);
-        b.HasIndex(e => e.UserId).IsUnique().HasFilter("[UserId] IS NOT NULL");
+        b.HasIndex(e => e.UserId).IsUnique().HasFilter("\"UserId\" IS NOT NULL");
         b.HasIndex(e => new { e.DepartmentId, e.IsActive, e.IsDeleted });
         b.HasIndex(e => new { e.FirstName, e.LastName });
         b.HasOne(e => e.Department).WithMany(d => d.Employees).HasForeignKey(e => e.DepartmentId).OnDelete(DeleteBehavior.Restrict);
@@ -145,7 +145,7 @@ public class AttendanceRecordConfiguration : IEntityTypeConfiguration<Attendance
         b.HasIndex(a => new { a.EmployeeId, a.AttendanceDate, a.ShiftNumber }).IsUnique();
         b.HasIndex(a => new { a.AttendanceDate, a.Status });
         b.HasIndex(a => new { a.AttendanceDate, a.EmployeeId }).IncludeProperties(a => new { a.CheckInTime, a.CheckOutTime, a.Status, a.LateMinutes });
-        b.HasIndex(a => a.MissingCheckOut).HasFilter("[MissingCheckOut] = 1");
+        b.HasIndex(a => a.MissingCheckOut).HasFilter("\"MissingCheckOut\"");
         b.Property(a => a.WorkingHours).HasPrecision(6, 2);
         b.Property(a => a.Notes).HasMaxLength(500);
         b.Property(a => a.CheckInIp).HasMaxLength(64);
@@ -165,7 +165,7 @@ public class WorkScheduleConfiguration : IEntityTypeConfiguration<WorkSchedule>
         b.Property(w => w.Name).HasMaxLength(100).IsRequired();
         b.Property(w => w.HalfDayThresholdHours).HasPrecision(5, 2);
         b.HasIndex(w => w.Name).IsUnique();
-        b.HasIndex(w => w.IsDefault).IsUnique().HasFilter("[IsDefault] = 1");
+        b.HasIndex(w => w.IsDefault).IsUnique().HasFilter("\"IsDefault\"");
     }
 }
 
@@ -178,7 +178,7 @@ public class HolidayConfiguration : IEntityTypeConfiguration<Holiday>
         b.Property(h => h.NameAr).HasMaxLength(150);
         b.Property(h => h.Description).HasMaxLength(500);
         b.HasIndex(h => new { h.StartDate, h.EndDate });
-        b.ToTable(t => t.HasCheckConstraint("CK_Holidays_Range", "[EndDate] >= [StartDate]"));
+        b.ToTable(t => t.HasCheckConstraint("CK_Holidays_Range", "\"EndDate\" >= \"StartDate\""));
     }
 }
 
@@ -192,7 +192,7 @@ public class LeaveRequestConfiguration : IEntityTypeConfiguration<LeaveRequest>
         b.HasIndex(l => new { l.EmployeeId, l.Status, l.StartDate, l.EndDate });
         b.HasOne(l => l.Employee).WithMany(e => e.LeaveRequests).HasForeignKey(l => l.EmployeeId).OnDelete(DeleteBehavior.Restrict);
         b.HasOne<ApplicationUser>().WithMany().HasForeignKey(l => l.ReviewedByUserId).OnDelete(DeleteBehavior.NoAction);
-        b.ToTable(t => t.HasCheckConstraint("CK_LeaveRequests_Range", "[EndDate] >= [StartDate]"));
+        b.ToTable(t => t.HasCheckConstraint("CK_LeaveRequests_Range", "\"EndDate\" >= \"StartDate\""));
     }
 }
 
@@ -215,7 +215,7 @@ public class TaskItemConfiguration : IEntityTypeConfiguration<TaskItem>
 {
     public void Configure(EntityTypeBuilder<TaskItem> b)
     {
-        b.ToTable("Tasks", t => t.HasCheckConstraint("CK_Tasks_Progress", "[ProgressPercent] BETWEEN 0 AND 100"));
+        b.ToTable("Tasks", t => t.HasCheckConstraint("CK_Tasks_Progress", "\"ProgressPercent\" BETWEEN 0 AND 100"));
         b.Ignore(t => t.IsClosed);
         b.Property(t => t.Title).HasMaxLength(200).IsRequired();
         b.Property(t => t.Description).HasMaxLength(4000);

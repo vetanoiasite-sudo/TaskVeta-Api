@@ -20,6 +20,7 @@ public class DatabaseSeeder(
     AppDbContext db,
     RoleManager<ApplicationRole> roles,
     IConfiguration config,
+    ICompanyClock clock,
     ILogger<DatabaseSeeder> logger)
 {
     public static async Task RunAsync(IServiceProvider services, CancellationToken ct = default)
@@ -36,6 +37,7 @@ public class DatabaseSeeder(
         await SeedRolesAsync();
         await SeedSettingsAsync(ct);
         await SeedScheduleAsync(ct);
+        await clock.GetTimeZoneAsync(ct); // primes the company time zone used to read attendance times
         await WarnIfNoAccountsAsync(ct);
     }
 

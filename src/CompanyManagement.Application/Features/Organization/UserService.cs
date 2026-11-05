@@ -61,8 +61,8 @@ public class UserService(
         if (q.IsActive is bool a) query = query.Where(u => u.IsActive == a);
         if (!string.IsNullOrWhiteSpace(q.Search))
         {
-            var s = q.Search.Trim();
-            query = query.Where(u => u.FullName.Contains(s) || u.Email!.Contains(s));
+            var s = q.Search.Trim().ToLower();
+            query = query.Where(u => u.FullName.ToLower().Contains(s) || u.Email!.ToLower().Contains(s));
         }
         if (!string.IsNullOrWhiteSpace(q.Role))
         {

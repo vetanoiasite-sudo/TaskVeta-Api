@@ -106,9 +106,8 @@ public class EmployeeService(
         if (q.IsActive is bool a) query = query.Where(e => e.IsActive == a);
         if (!string.IsNullOrWhiteSpace(q.Search))
         {
-            var s = q.Search.Trim();
-            query = query.Where(e => e.FirstName.Contains(s) || e.LastName.Contains(s) || e.EmployeeCode.Contains(s)
-                                     || e.Email.Contains(s) || (e.FirstName + " " + e.LastName).Contains(s));
+            var s = q.Search.Trim().ToLower();
+            query = query.Where(e => e.EmployeeCode.ToLower().Contains(s) || e.Email.ToLower().Contains(s) || (e.FirstName + " " + e.LastName).ToLower().Contains(s));
         }
         return await query.ApplySort(q, Sorts, "employeeCode").Select(Projection).ToPagedAsync(q, ct);
     }

@@ -137,6 +137,7 @@ public class SettingsService(IApplicationDbContext db, IAuditService audit, ICom
         audit.Log("Update", "SystemSettings", s.Id, old, r);
         await db.SaveChangesAsync(ct);
         clock.InvalidateCache();
+        await clock.GetTimeZoneAsync(ct); // reload so database reads use the new time zone right away
         return ToDto(s);
     }
 

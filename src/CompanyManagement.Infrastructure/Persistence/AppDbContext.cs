@@ -28,6 +28,13 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, TimeProvider t
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<CompanySettings> CompanySettings => Set<CompanySettings>();
 
+    protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
+    {
+        // PostgreSQL timestamptz stores UTC only; see DateTimeConverters.cs.
+        configurationBuilder.Properties<DateTime>().HaveConversion<UtcDateTimeConverter>();
+        configurationBuilder.Properties<DateTimeOffset>().HaveConversion<CompanyDateTimeOffsetConverter>();
+    }
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);

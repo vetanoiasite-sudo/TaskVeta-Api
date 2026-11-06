@@ -8,6 +8,12 @@ public static class Roles
     public const string Employee = "Employee";
 
     public static readonly string[] All = [SuperAdmin, Admin, Manager, Employee];
+
+    /// <summary>
+    /// Not an assignable role: added to the token automatically when the user's employee is a department head
+    /// or a team leader, so they can assign and review tasks for their own members whatever their role.
+    /// </summary>
+    public const string Leader = "Leader";
 }
 
 /// <summary>Fine-grained permissions. Each maps to an authorization policy of the same name.</summary>
@@ -55,6 +61,7 @@ public static class Permissions
             EmployeesView, AttendanceSelf, AttendanceViewTeam, LeaveApprove, TasksAssign, TasksReview, ReportsView
         ],
         [Roles.Employee] = [AttendanceSelf],
+        [Roles.Leader] = [TasksAssign, TasksReview],
     };
 
     public static IEnumerable<string> ForRoles(IEnumerable<string> roles) =>

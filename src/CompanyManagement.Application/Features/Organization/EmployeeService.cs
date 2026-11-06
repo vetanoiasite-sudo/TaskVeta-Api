@@ -114,7 +114,7 @@ public class EmployeeService(
 
     public async Task<IReadOnlyList<LookupDto>> LookupAsync(int? departmentId, int? teamId, CancellationToken ct = default)
     {
-        var query = (await scope.ScopedEmployeesAsync(ct)).Where(e => e.IsActive);
+        var query = (await scope.TaskScopedEmployeesAsync(ct)).Where(e => e.IsActive); // also feeds the task assignee picker
         if (departmentId is int d) query = query.Where(e => e.DepartmentId == d);
         if (teamId is int t) query = query.Where(e => e.TeamMemberships.Any(m => m.TeamId == t));
         return await query.OrderBy(e => e.FirstName).ThenBy(e => e.LastName)

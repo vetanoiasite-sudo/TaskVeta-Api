@@ -209,8 +209,8 @@ public class AuthService(
 
     private async Task<AuthResult> IssueTokensAsync(ApplicationUser user, Guid familyId, CancellationToken ct, RefreshToken? replacing = null)
     {
-        var roles = (await userManager.GetRolesAsync(user)).ToArray();
         var employeeId = await db.Employees.Where(e => e.UserId == user.Id && !e.IsDeleted).Select(e => (int?)e.Id).FirstOrDefaultAsync(ct);
+        var roles = await EffectiveRolesAsync(user, employeeId, ct);
         var access = tokens.CreateAccessToken(user, roles, employeeId, out var expiresAt);
 
         var raw = tokens.GenerateRefreshToken();
@@ -241,9 +241,20 @@ public class AuthService(
 
     private async Task<CurrentUserDto> BuildUserDtoAsync(ApplicationUser user, CancellationToken ct)
     {
-        var roles = (await userManager.GetRolesAsync(user)).ToArray();
         var employeeId = await db.Employees.Where(e => e.UserId == user.Id && !e.IsDeleted).Select(e => (int?)e.Id).FirstOrDefaultAsync(ct);
+        var roles = await EffectiveRolesAsync(user, employeeId, ct);
         return ToDto(user, roles, employeeId);
+    }
+
+    /// <summary>Identity roles plus <see cref="Roles.Leader"/> when the employee heads a department or leads a team.</summary>
+    private async Task<string[]> EffectiveRolesAsync(ApplicationUser user, int? employeeId, CancellationToken ct)
+    {
+        var roles = (await userManager.GetRolesAsync(user)).ToList();
+        if (employeeId is int me && (
+                await db.Departments.AnyAsync(d => d.ManagerEmployeeId == me && d.IsActive, ct) ||
+                await db.Teams.AnyAsync(t => t.LeaderEmployeeId == me && t.IsActive, ct)))
+            roles.Add(Roles.Leader);
+        return roles.ToArray();
     }
 
     private static CurrentUserDto ToDto(ApplicationUser user, string[] roles, int? employeeId) =>

@@ -16,6 +16,11 @@ public interface IAccessScope
     Task EnsureCanAccessEmployeeAsync(int employeeId, CancellationToken ct = default);
     /// <summary>Department ids the current user may filter by (null = all).</summary>
     Task<int[]?> AccessibleDepartmentIdsAsync(CancellationToken ct = default);
+    /// <summary>
+    /// Employees the current user may assign/review tasks for: everyone for task admins, otherwise themselves plus the
+    /// members of the departments they head and the teams they lead (Managers and position-based Leaders alike).
+    /// </summary>
+    Task<IQueryable<Employee>> TaskScopedEmployeesAsync(CancellationToken ct = default);
 }
 
 /// <summary>
@@ -50,12 +55,7 @@ public class AccessScope(IApplicationDbContext db, ICurrentUser user) : IAccessS
             case ScopeLevel.All:
                 return query;
             case ScopeLevel.Managed:
-            {
-                var me = await GetCurrentEmployeeIdAsync(ct) ?? -1;
-                return query.Where(e => e.Id == me
-                    || e.Department.ManagerEmployeeId == me
-                    || e.TeamMemberships.Any(tm => tm.Team.LeaderEmployeeId == me));
-            }
+                return Managed(query, await GetCurrentEmployeeIdAsync(ct) ?? -1);
             default:
             {
                 var me = await GetCurrentEmployeeIdAsync(ct) ?? -1;
@@ -63,6 +63,21 @@ public class AccessScope(IApplicationDbContext db, ICurrentUser user) : IAccessS
             }
         }
     }
+
+    public async Task<IQueryable<Employee>> TaskScopedEmployeesAsync(CancellationToken ct = default)
+    {
+        var query = db.Employees.Where(e => !e.IsDeleted);
+        if (Level == ScopeLevel.All || user.HasPermission(Permissions.TasksViewAll)) return query;
+        var me = await GetCurrentEmployeeIdAsync(ct) ?? -1;
+        return Level == ScopeLevel.Managed || user.IsInRole(Roles.Leader)
+            ? Managed(query, me)
+            : query.Where(e => e.Id == me);
+    }
+
+    private static IQueryable<Employee> Managed(IQueryable<Employee> query, int me) =>
+        query.Where(e => e.Id == me
+            || e.Department.ManagerEmployeeId == me
+            || e.TeamMemberships.Any(tm => tm.Team.LeaderEmployeeId == me));
 
     public async Task<bool> CanAccessEmployeeAsync(int employeeId, CancellationToken ct = default)
     {

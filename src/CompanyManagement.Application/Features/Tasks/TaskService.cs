@@ -66,7 +66,7 @@ public class TaskService(
         var me = await scope.GetCurrentEmployeeIdAsync(ct) ?? -1;
         if (currentUser.HasPermission(Permissions.TasksAssign))
         {
-            var scoped = (await scope.ScopedEmployeesAsync(ct)).Select(e => e.Id);
+            var scoped = (await scope.TaskScopedEmployeesAsync(ct)).Select(e => e.Id);
             return db.Tasks.Where(t => t.AssignedByUserId == userId || t.Assignments.Any(a => scoped.Contains(a.EmployeeId)));
         }
         return db.Tasks.Where(t => t.AssignedByUserId == userId || t.Assignments.Any(a => a.EmployeeId == me));
@@ -88,7 +88,7 @@ public class TaskService(
         var me = await scope.GetCurrentEmployeeIdAsync(ct);
         var others = task.Assignments.Select(a => a.EmployeeId).Where(id => id != me).ToList();
         if (others.Count == 0) return false;
-        var scoped = await scope.ScopedEmployeesAsync(ct);
+        var scoped = await scope.TaskScopedEmployeesAsync(ct);
         var inScope = await scoped.CountAsync(e => others.Contains(e.Id), ct);
         return inScope == others.Count;
     }
@@ -395,14 +395,14 @@ public class TaskService(
     {
         var distinct = ids.Distinct().ToArray();
         if (distinct.Length == 0) return [];
-        var scoped = await scope.ScopedEmployeesAsync(ct);
+        var scoped = await scope.TaskScopedEmployeesAsync(ct);
         var found = await db.Employees.Where(e => distinct.Contains(e.Id) && !e.IsDeleted && e.IsActive)
             .Select(e => new AssigneeInfo(e.Id, e.FirstName + " " + e.LastName, e.DepartmentId, e.UserId)).ToListAsync(ct);
         if (found.Count != distinct.Length) throw new BadRequestException("One or more assignees do not exist or are inactive.");
         if (!currentUser.HasPermission(Permissions.TasksViewAll))
         {
             var allowed = await scoped.CountAsync(e => distinct.Contains(e.Id), ct);
-            if (allowed != distinct.Length) throw new ForbiddenException("Managers can only assign tasks to their own team members.");
+            if (allowed != distinct.Length) throw new ForbiddenException("You can only assign tasks to members of the departments you head or the teams you lead.");
         }
         // Preserve requested order (first = primary assignee).
         return distinct.Select(id => found.First(f => f.Id == id)).ToList();
@@ -412,7 +412,8 @@ public class TaskService(
     {
         if (requested is int d)
         {
-            var allowed = await scope.AccessibleDepartmentIdsAsync(ct);
+            int[]? allowed = currentUser.HasPermission(Permissions.TasksViewAll) ? null
+                : await (await scope.TaskScopedEmployeesAsync(ct)).Select(e => e.DepartmentId).Distinct().ToArrayAsync(ct);
             if (allowed is not null && !allowed.Contains(d)) throw new ForbiddenException("You cannot create tasks for that department.");
             if (!await db.Departments.AnyAsync(x => x.Id == d, ct)) throw new NotFoundException("Department", d);
             return d;

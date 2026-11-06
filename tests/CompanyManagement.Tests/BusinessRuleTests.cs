@@ -157,6 +157,17 @@ public class PermissionTests
         Assert.DoesNotContain(Permissions.SettingsManage, Permissions.ForRoles([Roles.Admin]));
         Assert.Contains(Permissions.UsersManage, Permissions.ForRoles([Roles.SuperAdmin]));
     }
+
+    [Fact]
+    public void Department_and_team_leads_can_assign_and_review_tasks_only()
+    {
+        var p = Permissions.ForRoles([Roles.Employee, Roles.Leader]).ToList();
+        Assert.Contains(Permissions.TasksAssign, p);
+        Assert.Contains(Permissions.TasksReview, p);
+        Assert.DoesNotContain(Permissions.TasksViewAll, p);
+        Assert.DoesNotContain(Permissions.AttendanceViewTeam, p);
+        Assert.DoesNotContain(Roles.Leader, Roles.All); // never assignable from the Users page
+    }
 }
 
 public class AttendanceVerifierTests

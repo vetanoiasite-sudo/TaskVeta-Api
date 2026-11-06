@@ -53,10 +53,10 @@ public class TeamService(IApplicationDbContext db, IAuditService audit, ICompany
 
     public async Task<IReadOnlyList<LookupDto>> LookupAsync(int? departmentId, CancellationToken ct = default)
     {
-        var allowed = await scope.AccessibleDepartmentIdsAsync(ct);
+        var allowed = await scope.AccessibleTeamIdsAsync(ct);
         var q = db.Teams.Where(t => t.IsActive);
         if (departmentId is int d) q = q.Where(t => t.DepartmentId == d);
-        if (allowed is not null) q = q.Where(t => allowed.Contains(t.DepartmentId));
+        if (allowed is not null) q = q.Where(t => allowed.Contains(t.Id));
         return await q.OrderBy(t => t.Name).Select(t => new LookupDto(t.Id, t.Name, null)).ToListAsync(ct);
     }
 

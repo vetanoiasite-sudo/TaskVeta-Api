@@ -412,19 +412,16 @@ public class TaskService(
     }
 
     /// <summary>
-    /// Departments and teams the current user may give tasks to (null = any). Task admins: everything. Others: the
-    /// departments they head or where their assignable people work, and the teams they lead or that sit in a department they head.
+    /// Departments and teams the current user may give tasks to (null = any). Task admins: everything. Others: only the
+    /// departments they head and the teams they lead or that belong to a department they head.
     /// </summary>
     private async Task<(int[]? Departments, int[]? Teams)> AllowedTargetsAsync(CancellationToken ct)
     {
         if (currentUser.HasPermission(Permissions.TasksViewAll)) return (null, null);
         var me = await scope.GetCurrentEmployeeIdAsync(ct) ?? -1;
-        var headed = await db.Departments.Where(d => d.ManagerEmployeeId == me && d.IsActive).Select(d => d.Id).ToListAsync(ct);
-        var memberDepartments = await (await scope.TaskScopedEmployeesAsync(ct)).Where(e => e.Id != me)
-            .Select(e => e.DepartmentId).Distinct().ToListAsync(ct);
-        var teams = await db.Teams.Where(t => t.IsActive && (t.LeaderEmployeeId == me || headed.Contains(t.DepartmentId)))
-            .Select(t => t.Id).ToArrayAsync(ct);
-        return (headed.Union(memberDepartments).ToArray(), teams);
+        var departments = await db.Departments.Where(d => d.ManagerEmployeeId == me).Select(d => d.Id).ToArrayAsync(ct);
+        var teams = await db.Teams.Where(t => t.LeaderEmployeeId == me || t.Department.ManagerEmployeeId == me).Select(t => t.Id).ToArrayAsync(ct);
+        return (departments, teams);
     }
 
     public async Task<TaskTargetsDto> GetTargetsAsync(CancellationToken ct = default)

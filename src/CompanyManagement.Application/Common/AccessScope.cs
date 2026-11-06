@@ -14,8 +14,10 @@ public interface IAccessScope
     Task<IQueryable<Employee>> ScopedEmployeesAsync(CancellationToken ct = default);
     Task<bool> CanAccessEmployeeAsync(int employeeId, CancellationToken ct = default);
     Task EnsureCanAccessEmployeeAsync(int employeeId, CancellationToken ct = default);
-    /// <summary>Department ids the current user may filter by (null = all).</summary>
+    /// <summary>Departments the current user may pick (null = all): admins everything, others only the departments they head.</summary>
     Task<int[]?> AccessibleDepartmentIdsAsync(CancellationToken ct = default);
+    /// <summary>Teams the current user may pick (null = all): admins everything, others the teams they lead or that belong to a department they head.</summary>
+    Task<int[]?> AccessibleTeamIdsAsync(CancellationToken ct = default);
     /// <summary>
     /// Employees the current user may assign/review tasks for: everyone for task admins, otherwise themselves plus the
     /// members of the departments they head and the teams they lead (Managers and position-based Leaders alike).
@@ -95,7 +97,15 @@ public class AccessScope(IApplicationDbContext db, ICurrentUser user) : IAccessS
     public async Task<int[]?> AccessibleDepartmentIdsAsync(CancellationToken ct = default)
     {
         if (Level == ScopeLevel.All) return null;
-        var scoped = await ScopedEmployeesAsync(ct);
-        return await scoped.Select(e => e.DepartmentId).Distinct().ToArrayAsync(ct);
+        var me = await GetCurrentEmployeeIdAsync(ct) ?? -1;
+        return await db.Departments.Where(d => d.ManagerEmployeeId == me).Select(d => d.Id).ToArrayAsync(ct);
+    }
+
+    public async Task<int[]?> AccessibleTeamIdsAsync(CancellationToken ct = default)
+    {
+        if (Level == ScopeLevel.All) return null;
+        var me = await GetCurrentEmployeeIdAsync(ct) ?? -1;
+        return await db.Teams.Where(t => t.LeaderEmployeeId == me || t.Department.ManagerEmployeeId == me)
+            .Select(t => t.Id).ToArrayAsync(ct);
     }
 }

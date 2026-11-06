@@ -103,6 +103,8 @@ public class UserService(
 
         var existingEmail = await userManager.FindByEmailAsync(r.Email);
         if (existingEmail is not null && existingEmail.Id != id) throw new ConflictException("Email already in use.");
+        if (r.EmployeeId is int empForEmail && await db.Employees.AnyAsync(e => e.Email == r.Email.Trim() && e.Id != empForEmail && !e.IsDeleted, ct))
+            throw new ConflictException("Another employee uses this email.");
 
         var oldRoles = (await userManager.GetRolesAsync(user)).ToArray();
         var old = new { user.FullName, user.Email, user.IsActive, Roles = oldRoles };
@@ -130,6 +132,16 @@ public class UserService(
                 var emp = await db.Employees.FirstOrDefaultAsync(e => e.Id == empId && !e.IsDeleted, ct) ?? throw new NotFoundException("Employee", empId);
                 if (emp.UserId is not null && emp.UserId != id) throw new ConflictException("That employee is linked to another account.");
                 emp.UserId = id;
+            }
+        }
+
+        // Keep the linked employee's email in step with the login email.
+        if (r.EmployeeId is int linkedId)
+        {
+            var linked = await db.Employees.FirstOrDefaultAsync(e => e.Id == linkedId, ct);
+            if (linked is not null && !string.Equals(linked.Email, user.Email, StringComparison.OrdinalIgnoreCase))
+            {
+                linked.Email = user.Email!;
             }
         }
 

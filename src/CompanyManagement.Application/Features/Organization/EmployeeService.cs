@@ -210,7 +210,16 @@ public class EmployeeService(
             {
                 user.FullName = e.FullName;
                 if (!r.IsActive && user.IsActive) user.IsActive = false;
-                await userManager.UpdateAsync(user);
+                // Keep the login email in step with the employee email (the account signs in with it).
+                if (!string.Equals(user.Email, e.Email, StringComparison.OrdinalIgnoreCase))
+                {
+                    var other = await userManager.FindByEmailAsync(e.Email);
+                    if (other is not null && other.Id != user.Id) throw new ConflictException("Another account uses this email.");
+                    user.Email = e.Email;
+                    user.UserName = e.Email;
+                }
+                var upd = await userManager.UpdateAsync(user);
+                if (!upd.Succeeded) throw new BadRequestException(string.Join(" ", upd.Errors.Select(x => x.Description)));
             }
         }
 

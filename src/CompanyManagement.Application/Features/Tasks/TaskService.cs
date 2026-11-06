@@ -435,8 +435,8 @@ public class TaskService(
         if (teamIds is not null) teams = teams.Where(t => teamIds.Contains(t.Id));
 
         return new TaskTargetsDto(
-            await departments.OrderBy(d => d.Name).Select(d => new TaskTargetDepartmentDto(d.Id, d.Name, d.NameAr)).ToListAsync(ct),
-            await teams.OrderBy(t => t.Name).Select(t => new TaskTargetTeamDto(t.Id, t.Name, t.NameAr, t.DepartmentId)).ToListAsync(ct),
+            await departments.OrderBy(d => d.Name).Select(d => new TaskTargetDepartmentDto(d.Id, d.Name, d.NameAr, d.ManagerEmployeeId)).ToListAsync(ct),
+            await teams.OrderBy(t => t.Name).Select(t => new TaskTargetTeamDto(t.Id, t.Name, t.NameAr, t.DepartmentId, t.LeaderEmployeeId)).ToListAsync(ct),
             await (await scope.TaskScopedEmployeesAsync(ct)).Where(e => e.IsActive)
                 .OrderBy(e => e.FirstName).ThenBy(e => e.LastName)
                 .Select(e => new TaskTargetEmployeeDto(e.Id, e.FirstName + " " + e.LastName, e.EmployeeCode, e.DepartmentId,

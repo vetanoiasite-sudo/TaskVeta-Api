@@ -49,8 +49,8 @@ public record UpdateTaskRequest(string Title, string? Description, TaskPriority 
 /// <summary>What the current user may pick in the task form: departments, teams and assignable employees.</summary>
 public record TaskTargetsDto(IReadOnlyList<TaskTargetDepartmentDto> Departments, IReadOnlyList<TaskTargetTeamDto> Teams,
     IReadOnlyList<TaskTargetEmployeeDto> Employees);
-public record TaskTargetDepartmentDto(int Id, string Name, string? NameAr);
-public record TaskTargetTeamDto(int Id, string Name, string? NameAr, int DepartmentId);
+public record TaskTargetDepartmentDto(int Id, string Name, string? NameAr, int? ManagerEmployeeId);
+public record TaskTargetTeamDto(int Id, string Name, string? NameAr, int DepartmentId, int? LeaderEmployeeId);
 public record TaskTargetEmployeeDto(int Id, string Name, string Code, int DepartmentId, int[] TeamIds);
 
 public record UpdateTaskStatusRequest(TaskItemStatus Status, string? Note, int? ProgressPercent);

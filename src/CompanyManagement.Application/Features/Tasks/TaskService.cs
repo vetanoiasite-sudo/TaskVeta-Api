@@ -23,6 +23,7 @@ public interface ITaskService
     Task<(TaskAttachment Attachment, Stream Content)> OpenAttachmentAsync(int id, int attachmentId, CancellationToken ct = default);
     Task DeleteAttachmentAsync(int id, int attachmentId, CancellationToken ct = default);
     Task<TaskDashboardDto> GetDashboardAsync(bool mine, CancellationToken ct = default);
+    Task<TaskTargetsDto> GetTargetsAsync(CancellationToken ct = default);
 }
 
 public class TaskService(
@@ -54,6 +55,7 @@ public class TaskService(
         t.Id, t.Title, t.Priority, t.Status, t.ProgressPercent, t.StartDate, t.DueDate, t.CompletionDate,
         t.Status != TaskItemStatus.Completed && t.Status != TaskItemStatus.Cancelled && t.DueDate != null && t.DueDate < now,
         t.AssignedByUserId, t.AssignedBy.FullName, t.DepartmentId, t.Department != null ? t.Department.Name : null,
+        t.TeamId, t.Team != null ? t.Team.Name : null,
         t.Assignments.Select(a => new TaskAssigneeDto(a.EmployeeId, a.Employee.EmployeeCode, a.Employee.FirstName + " " + a.Employee.LastName)).ToList(),
         t.Comments.Count, t.Attachments.Count, t.CreatedAt, t.UpdatedAt);
 
@@ -127,6 +129,7 @@ public class TaskService(
         if (q.Priority is TaskPriority p) query = query.Where(t => t.Priority == p);
         if (q.AssigneeId is int a) query = query.Where(t => t.Assignments.Any(x => x.EmployeeId == a));
         if (q.DepartmentId is int d) query = query.Where(t => t.DepartmentId == d);
+        if (q.TeamId is int tm) query = query.Where(t => t.TeamId == tm);
         if (q.Overdue == true)
             query = query.Where(t => t.Status != TaskItemStatus.Completed && t.Status != TaskItemStatus.Cancelled && t.DueDate != null && t.DueDate < now);
         if (q.DueFrom is DateTime df) query = query.Where(t => t.DueDate >= df);
@@ -163,12 +166,12 @@ public class TaskService(
     {
         if (!currentUser.HasPermission(Permissions.TasksAssign)) throw new ForbiddenException("You cannot assign tasks.");
         var assignees = await ValidateAssigneesAsync(r.AssigneeEmployeeIds, ct);
-        var departmentId = await ResolveDepartmentAsync(r.DepartmentId, assignees, ct);
+        var (departmentId, teamId) = await ResolveTargetAsync(r.DepartmentId, r.TeamId, assignees, ct);
 
         var task = new TaskItem
         {
             Title = r.Title.Trim(), Description = r.Description, Priority = r.Priority, StartDate = r.StartDate, DueDate = r.DueDate,
-            DepartmentId = departmentId, AssignedByUserId = currentUser.UserId!.Value,
+            DepartmentId = departmentId, TeamId = teamId, AssignedByUserId = currentUser.UserId!.Value,
             AssignedToEmployeeId = assignees.FirstOrDefault()?.Id,
             Status = assignees.Count > 0 ? TaskItemStatus.Assigned : TaskItemStatus.New
         };
@@ -182,7 +185,7 @@ public class TaskService(
         db.Tasks.Add(task);
         await db.SaveChangesAsync(ct);
 
-        audit.Log("Create", "Task", task.Id, newValues: new { r.Title, r.Priority, r.DueDate, Assignees = r.AssigneeEmployeeIds });
+        audit.Log("Create", "Task", task.Id, newValues: new { r.Title, r.Priority, r.DueDate, departmentId, teamId, Assignees = r.AssigneeEmployeeIds });
         NotifyAssigned(task, assignees.Select(a => a.Id));
         await notifications.SaveAndDispatchAsync(ct);
         return await GetAsync(task.Id, ct);
@@ -196,7 +199,7 @@ public class TaskService(
             throw new ConflictException("The task was modified by someone else. Reload and try again.");
 
         var assignees = await ValidateAssigneesAsync(r.AssigneeEmployeeIds, ct);
-        var old = new { task.Title, task.Priority, task.DueDate, task.StartDate, Assignees = task.Assignments.Select(a => a.EmployeeId).ToArray() };
+        var old = new { task.Title, task.Priority, task.DueDate, task.StartDate, task.DepartmentId, task.TeamId, Assignees = task.Assignments.Select(a => a.EmployeeId).ToArray() };
 
         task.Title = r.Title.Trim();
         task.Description = r.Description;
@@ -204,7 +207,7 @@ public class TaskService(
         task.StartDate = r.StartDate;
         if (task.DueDate != r.DueDate) { task.DeadlineReminderSentAt = null; task.OverdueNotifiedAt = null; }
         task.DueDate = r.DueDate;
-        task.DepartmentId = await ResolveDepartmentAsync(r.DepartmentId, assignees, ct);
+        (task.DepartmentId, task.TeamId) = await ResolveTargetAsync(r.DepartmentId, r.TeamId, assignees, ct);
 
         var desired = assignees.Select(a => a.Id).ToHashSet();
         var removed = task.Assignments.Where(a => !desired.Contains(a.EmployeeId)).ToList();
@@ -226,7 +229,7 @@ public class TaskService(
             TaskId = id, ChangedByUserId = currentUser.UserId, Action = "Updated",
             Details = details.Count > 0 ? "Changed " + string.Join(", ", details) : "Details updated"
         });
-        audit.Log("Update", "Task", id, old, new { r.Title, r.Priority, r.DueDate, r.StartDate, Assignees = r.AssigneeEmployeeIds });
+        audit.Log("Update", "Task", id, old, new { r.Title, r.Priority, r.DueDate, r.StartDate, task.DepartmentId, task.TeamId, Assignees = r.AssigneeEmployeeIds });
         NotifyAssigned(task, added);
 
         try { await notifications.SaveAndDispatchAsync(ct); }
@@ -408,17 +411,63 @@ public class TaskService(
         return distinct.Select(id => found.First(f => f.Id == id)).ToList();
     }
 
-    private async Task<int?> ResolveDepartmentAsync(int? requested, List<AssigneeInfo> assignees, CancellationToken ct)
+    /// <summary>
+    /// Departments and teams the current user may give tasks to (null = any). Task admins: everything. Others: the
+    /// departments they head or where their assignable people work, and the teams they lead or that sit in a department they head.
+    /// </summary>
+    private async Task<(int[]? Departments, int[]? Teams)> AllowedTargetsAsync(CancellationToken ct)
     {
-        if (requested is int d)
+        if (currentUser.HasPermission(Permissions.TasksViewAll)) return (null, null);
+        var me = await scope.GetCurrentEmployeeIdAsync(ct) ?? -1;
+        var headed = await db.Departments.Where(d => d.ManagerEmployeeId == me && d.IsActive).Select(d => d.Id).ToListAsync(ct);
+        var memberDepartments = await (await scope.TaskScopedEmployeesAsync(ct)).Where(e => e.Id != me)
+            .Select(e => e.DepartmentId).Distinct().ToListAsync(ct);
+        var teams = await db.Teams.Where(t => t.IsActive && (t.LeaderEmployeeId == me || headed.Contains(t.DepartmentId)))
+            .Select(t => t.Id).ToArrayAsync(ct);
+        return (headed.Union(memberDepartments).ToArray(), teams);
+    }
+
+    public async Task<TaskTargetsDto> GetTargetsAsync(CancellationToken ct = default)
+    {
+        if (!currentUser.HasPermission(Permissions.TasksAssign)) throw new ForbiddenException("You cannot assign tasks.");
+        var (deptIds, teamIds) = await AllowedTargetsAsync(ct);
+
+        var departments = db.Departments.Where(d => d.IsActive);
+        if (deptIds is not null) departments = departments.Where(d => deptIds.Contains(d.Id));
+        var teams = db.Teams.Where(t => t.IsActive);
+        if (teamIds is not null) teams = teams.Where(t => teamIds.Contains(t.Id));
+
+        return new TaskTargetsDto(
+            await departments.OrderBy(d => d.Name).Select(d => new TaskTargetDepartmentDto(d.Id, d.Name, d.NameAr)).ToListAsync(ct),
+            await teams.OrderBy(t => t.Name).Select(t => new TaskTargetTeamDto(t.Id, t.Name, t.NameAr, t.DepartmentId)).ToListAsync(ct),
+            await (await scope.TaskScopedEmployeesAsync(ct)).Where(e => e.IsActive)
+                .OrderBy(e => e.FirstName).ThenBy(e => e.LastName)
+                .Select(e => new TaskTargetEmployeeDto(e.Id, e.FirstName + " " + e.LastName, e.EmployeeCode, e.DepartmentId,
+                    e.TeamMemberships.Select(m => m.TeamId).ToArray()))
+                .ToListAsync(ct));
+    }
+
+    /// <summary>Validates the chosen department/team; a team implies its department. Neither → the first assignee's department.</summary>
+    private async Task<(int? DepartmentId, int? TeamId)> ResolveTargetAsync(int? departmentId, int? teamId, List<AssigneeInfo> assignees,
+        CancellationToken ct)
+    {
+        var (allowedDepartments, allowedTeams) = await AllowedTargetsAsync(ct);
+        if (teamId is int t)
         {
-            int[]? allowed = currentUser.HasPermission(Permissions.TasksViewAll) ? null
-                : await (await scope.TaskScopedEmployeesAsync(ct)).Select(e => e.DepartmentId).Distinct().ToArrayAsync(ct);
-            if (allowed is not null && !allowed.Contains(d)) throw new ForbiddenException("You cannot create tasks for that department.");
-            if (!await db.Departments.AnyAsync(x => x.Id == d, ct)) throw new NotFoundException("Department", d);
-            return d;
+            var teamDepartment = await db.Teams.Where(x => x.Id == t).Select(x => (int?)x.DepartmentId).FirstOrDefaultAsync(ct)
+                                 ?? throw new NotFoundException("Team", t);
+            if (allowedTeams is not null && !allowedTeams.Contains(t)) throw new ForbiddenException("You cannot create tasks for that team.");
+            if (departmentId is int chosen && chosen != teamDepartment)
+                throw new BadRequestException("The selected team does not belong to the selected department.");
+            return (teamDepartment, t);
         }
-        return assignees.FirstOrDefault()?.DepartmentId;
+        if (departmentId is int d)
+        {
+            if (allowedDepartments is not null && !allowedDepartments.Contains(d)) throw new ForbiddenException("You cannot create tasks for that department.");
+            if (!await db.Departments.AnyAsync(x => x.Id == d, ct)) throw new NotFoundException("Department", d);
+            return (d, null);
+        }
+        return (assignees.FirstOrDefault()?.DepartmentId, null);
     }
 
     private void NotifyAssigned(TaskItem task, IEnumerable<int> employeeIds)

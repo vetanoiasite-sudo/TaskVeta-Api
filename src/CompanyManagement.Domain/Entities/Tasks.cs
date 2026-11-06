@@ -18,6 +18,10 @@ public class TaskItem : BaseEntity
     public int? DepartmentId { get; set; }
     public Department? Department { get; set; }
 
+    /// <summary>Optional team the task was given to (its members are the expected assignees).</summary>
+    public int? TeamId { get; set; }
+    public Team? Team { get; set; }
+
     public TaskPriority Priority { get; set; } = TaskPriority.Medium;
     public TaskItemStatus Status { get; set; } = TaskItemStatus.New;
     public int ProgressPercent { get; set; }

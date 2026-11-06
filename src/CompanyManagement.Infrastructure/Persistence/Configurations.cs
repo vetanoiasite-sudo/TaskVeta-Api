@@ -224,10 +224,12 @@ public class TaskItemConfiguration : IEntityTypeConfiguration<TaskItem>
         b.HasIndex(t => new { t.Status, t.DueDate });
         b.HasIndex(t => t.AssignedByUserId);
         b.HasIndex(t => t.DepartmentId);
+        b.HasIndex(t => t.TeamId);
         b.HasIndex(t => t.CreatedAt);
         b.HasOne(t => t.AssignedBy).WithMany().HasForeignKey(t => t.AssignedByUserId).OnDelete(DeleteBehavior.Restrict);
         b.HasOne(t => t.AssignedTo).WithMany().HasForeignKey(t => t.AssignedToEmployeeId).OnDelete(DeleteBehavior.NoAction);
         b.HasOne(t => t.Department).WithMany().HasForeignKey(t => t.DepartmentId).OnDelete(DeleteBehavior.NoAction);
+        b.HasOne(t => t.Team).WithMany().HasForeignKey(t => t.TeamId).OnDelete(DeleteBehavior.SetNull);
     }
 }
 

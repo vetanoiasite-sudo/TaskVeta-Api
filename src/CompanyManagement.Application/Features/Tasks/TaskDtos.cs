@@ -8,7 +8,7 @@ public record TaskAssigneeDto(int EmployeeId, string EmployeeCode, string FullNa
 
 public record TaskDto(int Id, string Title, TaskPriority Priority, TaskItemStatus Status, int ProgressPercent, DateTime? StartDate,
     DateTime? DueDate, DateTime? CompletionDate, bool IsOverdue, int AssignedByUserId, string AssignedByName, int? DepartmentId,
-    string? DepartmentName, IReadOnlyList<TaskAssigneeDto> Assignees, int CommentCount, int AttachmentCount, DateTime CreatedAt,
+    string? DepartmentName, int? TeamId, string? TeamName, IReadOnlyList<TaskAssigneeDto> Assignees, int CommentCount, int AttachmentCount, DateTime CreatedAt,
     DateTime UpdatedAt);
 
 public record TaskCommentDto(int Id, int UserId, string UserName, string Content, DateTime CreatedAt);
@@ -30,6 +30,7 @@ public class TaskQuery : PagedRequest
     public TaskPriority? Priority { get; set; }
     public int? AssigneeId { get; set; }
     public int? DepartmentId { get; set; }
+    public int? TeamId { get; set; }
     public bool? Overdue { get; set; }
     public DateTime? DueFrom { get; set; }
     public DateTime? DueTo { get; set; }
@@ -40,10 +41,17 @@ public class TaskQuery : PagedRequest
 }
 
 public record CreateTaskRequest(string Title, string? Description, TaskPriority Priority, DateTime? StartDate, DateTime? DueDate,
-    int? DepartmentId, int[] AssigneeEmployeeIds);
+    int? DepartmentId, int[] AssigneeEmployeeIds, int? TeamId = null);
 
 public record UpdateTaskRequest(string Title, string? Description, TaskPriority Priority, DateTime? StartDate, DateTime? DueDate,
-    int? DepartmentId, int[] AssigneeEmployeeIds, string? RowVersion);
+    int? DepartmentId, int[] AssigneeEmployeeIds, string? RowVersion, int? TeamId = null);
+
+/// <summary>What the current user may pick in the task form: departments, teams and assignable employees.</summary>
+public record TaskTargetsDto(IReadOnlyList<TaskTargetDepartmentDto> Departments, IReadOnlyList<TaskTargetTeamDto> Teams,
+    IReadOnlyList<TaskTargetEmployeeDto> Employees);
+public record TaskTargetDepartmentDto(int Id, string Name, string? NameAr);
+public record TaskTargetTeamDto(int Id, string Name, string? NameAr, int DepartmentId);
+public record TaskTargetEmployeeDto(int Id, string Name, string Code, int DepartmentId, int[] TeamIds);
 
 public record UpdateTaskStatusRequest(TaskItemStatus Status, string? Note, int? ProgressPercent);
 public record UpdateTaskProgressRequest(int ProgressPercent, string? Note);

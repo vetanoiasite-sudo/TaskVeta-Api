@@ -965,6 +965,9 @@ namespace CompanyManagement.Infrastructure.Persistence.Migrations
                     b.Property<int>("Status")
                         .HasColumnType("integer");
 
+                    b.Property<int?>("TeamId")
+                        .HasColumnType("integer");
+
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -982,6 +985,8 @@ namespace CompanyManagement.Infrastructure.Persistence.Migrations
                     b.HasIndex("CreatedAt");
 
                     b.HasIndex("DepartmentId");
+
+                    b.HasIndex("TeamId");
 
                     b.HasIndex("Status", "DueDate");
 
@@ -1409,11 +1414,18 @@ namespace CompanyManagement.Infrastructure.Persistence.Migrations
                         .HasForeignKey("DepartmentId")
                         .OnDelete(DeleteBehavior.NoAction);
 
+                    b.HasOne("CompanyManagement.Domain.Entities.Team", "Team")
+                        .WithMany()
+                        .HasForeignKey("TeamId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.Navigation("AssignedBy");
 
                     b.Navigation("AssignedTo");
 
                     b.Navigation("Department");
+
+                    b.Navigation("Team");
                 });
 
             modelBuilder.Entity("CompanyManagement.Domain.Entities.Team", b =>

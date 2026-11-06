@@ -31,6 +31,11 @@ public class TasksController(ITaskService tasks, IExportService export) : Contro
         return Ok(await tasks.GetPagedAsync(query, ct));
     }
 
+    /// <summary>Departments, teams and employees the current user may pick when creating/editing a task.</summary>
+    [HttpGet("targets")]
+    [Authorize(Policy = Permissions.TasksAssign)]
+    public async Task<ActionResult<TaskTargetsDto>> Targets(CancellationToken ct) => Ok(await tasks.GetTargetsAsync(ct));
+
     [HttpGet("dashboard")]
     public async Task<ActionResult<TaskDashboardDto>> Dashboard([FromQuery] bool mine = false, CancellationToken ct = default) =>
         Ok(await tasks.GetDashboardAsync(mine, ct));

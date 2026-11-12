@@ -10,7 +10,7 @@ namespace CompanyManagement.Application.Features.Sprints;
 
 /// <summary>Counts are over all tasks of the sprint.</summary>
 public record SprintDto(int Id, string Name, string? Goal, DateOnly StartDate, DateOnly EndDate, SprintStatus Status, DateTime? CompletedAt,
-    int TaskCount, int CompletedTaskCount, decimal EstimateDays, decimal CompletedEstimateDays, bool CanManage);
+    int TaskCount, int CompletedTaskCount, decimal EstimateDays, decimal CompletedEstimateDays, bool CanManage, int OpenTaskCount);
 
 public record SaveSprintRequest(string Name, string? Goal, DateOnly StartDate, DateOnly EndDate);
 
@@ -92,7 +92,8 @@ public class SprintService(IApplicationDbContext db, ITaskService tasks, IAuditS
         return q.Select(s => new SprintDto(s.Id, s.Name, s.Goal, s.StartDate, s.EndDate, s.Status, s.CompletedAt,
             s.Tasks.Count(), s.Tasks.Count(t => t.Status == TaskItemStatus.Completed),
             s.Tasks.Where(t => t.Status != TaskItemStatus.Cancelled).Sum(t => t.EstimateDays ?? 0),
-            s.Tasks.Where(t => t.Status == TaskItemStatus.Completed).Sum(t => t.EstimateDays ?? 0), canManage));
+            s.Tasks.Where(t => t.Status == TaskItemStatus.Completed).Sum(t => t.EstimateDays ?? 0), canManage,
+            s.Tasks.Count(t => t.Status != TaskItemStatus.Completed && t.Status != TaskItemStatus.Cancelled)));
     }
 
     public async Task<SprintDto> CreateAsync(SaveSprintRequest r, CancellationToken ct = default)

@@ -136,6 +136,7 @@ public enum ProjectDocumentCategory
 {
     Discovery = 1,
     BusinessRequirements = 2,
+    /// <summary>The UI/UX documentation (03-UIUX-DESIGN): screens with SCR codes, flows, states. The design itself stays in Figma.</summary>
     Design = 3,
     Technical = 4,
     Testing = 5,

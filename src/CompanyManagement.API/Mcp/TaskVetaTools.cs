@@ -146,7 +146,7 @@ public class TaskVetaTools(
     // ================================================================== project documents
 
     [McpServerTool(Name = "list_project_documents", Title = "Project documents", ReadOnly = true, Idempotent = true, OpenWorld = false)]
-    [Description("The documents of a project (Discovery, BR, design, technical, testing, meetings, client files) with their id and whether their text can be read.")]
+    [Description("The documents of a project (Discovery, BR, UI/UX documentation, technical, testing, meetings, client files) with their id and whether their text can be read.")]
     public Task<string> ListDocuments([Description("Project code or name.")] string project, CancellationToken ct) => Run(async () =>
         (await documents.GetAllAsync(await ProjectIdAsync(project, ct), ct)).Select(DocLine));
 
@@ -174,7 +174,7 @@ public class TaskVetaTools(
     public Task<string> SaveDocument(
         [Description("Project code or name.")] string project,
         [Description("Document title.")] string title,
-        [Description("Discovery, BusinessRequirements, Design, Technical, Testing, Meeting, Client or Other.")] string category,
+        [Description("Discovery, BusinessRequirements, Design (the UI/UX documentation: screen list with SCR codes, flows, states; never Figma files), Technical, Testing, Meeting, Client or Other.")] string category,
         [Description("The document in Markdown.")] string content,
         CancellationToken ct = default) => Run(async () =>
     {

@@ -18,7 +18,8 @@ public class TaskVetaPrompts
         - A feature is a parent task with sub-tasks per discipline (UI/UX → Backend → Frontend/Mobile → QA), linked with dependencies.
           Reference the BR story (US-…) and the screen code (SCR-…) when known. Estimates are in working days.
         - Sprints are company-wide (2 weeks); capacity target: 60% new features, 25% improvements, 15% bugs.
-        - Project documents follow the templates: Discovery, BusinessRequirements, Design, Technical, Testing, Meeting, Client.
+        - Project documents follow the templates: Discovery, BusinessRequirements, Design (the UI/UX documentation), Technical, Testing, Meeting,
+          Client. Figma is the source of truth for the design itself: designs are linked (project / task design URL), never uploaded.
 
         Rules:
         - Read freely. Before ANY change (create, edit, status, comment, block, sprint, document), show the user exactly what you will do

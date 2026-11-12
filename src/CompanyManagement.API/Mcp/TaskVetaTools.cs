@@ -146,7 +146,7 @@ public class TaskVetaTools(
     // ================================================================== project documents
 
     [McpServerTool(Name = "list_project_documents", Title = "Project documents", ReadOnly = true, Idempotent = true, OpenWorld = false)]
-    [Description("The documents of a project (Discovery, BR, UI/UX documentation, technical, testing, meetings, client files) with their id and whether their text can be read.")]
+    [Description("The documents of a project (Discovery, BR, UI/UX, Backend and Frontend documentation, testing, meetings, client files, other technical notes) with their id and whether their text can be read.")]
     public Task<string> ListDocuments([Description("Project code or name.")] string project, CancellationToken ct) => Run(async () =>
         (await documents.GetAllAsync(await ProjectIdAsync(project, ct), ct)).Select(DocLine));
 
@@ -174,7 +174,7 @@ public class TaskVetaTools(
     public Task<string> SaveDocument(
         [Description("Project code or name.")] string project,
         [Description("Document title.")] string title,
-        [Description("Discovery, BusinessRequirements, Design (the UI/UX documentation: screen list with SCR codes, flows, states; never Figma files), Technical, Testing, Meeting, Client or Other.")] string category,
+        [Description("Discovery, BusinessRequirements, Design (the UI/UX documentation: screen list with SCR codes, flows, states; never Figma files), Backend (backend documentation: API, data model), Frontend (frontend documentation), Testing, Meeting, Client, Technical (other technical notes) or Other.")] string category,
         [Description("The document in Markdown.")] string content,
         CancellationToken ct = default) => Run(async () =>
     {
@@ -490,7 +490,7 @@ public class TaskVetaTools(
     // ================================================================== sprints
 
     [McpServerTool(Name = "list_sprints", Title = "List sprints", ReadOnly = true, Idempotent = true, OpenWorld = false)]
-    [Description("Sprints (company-wide, normally 2 weeks) with dates, status and task counts.")]
+    [Description("Sprints (company-wide; default length set in the company settings) with dates, status and task counts.")]
     public Task<string> ListSprints([Description("Include completed sprints.")] bool includeCompleted = false, CancellationToken ct = default) =>
         Run(async () => (await sprints.GetAllAsync(includeCompleted, ct)).Select(s => new
         {
@@ -500,7 +500,7 @@ public class TaskVetaTools(
 
     [McpServerTool(Name = "sprint_report", Title = "Sprint report", ReadOnly = true, Idempotent = true, OpenWorld = false)]
     [Description("Progress of a sprint: completion, blocked and overdue tasks, work per person / project / type, and the capacity split " +
-                 "(target: 60% new features, 25% improvements, 15% bugs). Default: the active sprint.")]
+                 "against the company's capacity target when one is set in the settings (capacityTarget is null when there is none). Default: the active sprint.")]
     public Task<string> SprintReport([Description("'current' (default), a sprint name or id.")] string? sprint = null, CancellationToken ct = default) =>
         Run(async () =>
         {
@@ -513,7 +513,7 @@ public class TaskVetaTools(
                 Sprint = new { r.Sprint.Name, r.Sprint.Goal, r.Sprint.Status, r.Sprint.StartDate, r.Sprint.EndDate },
                 r.Total, r.Completed, r.InProgress, r.InReview, r.NotStarted, r.Rejected, r.Cancelled, r.Blocked, r.Overdue, r.Unestimated,
                 r.EstimateDays, r.CompletedEstimateDays, r.CompletionPercent,
-                CapacitySplitPercent = r.CapacitySplit, CapacityTarget = new { New = 60, Improve = 25, Bugs = 15 },
+                CapacitySplitPercent = r.CapacitySplit, CapacityTarget = (object?)r.CapacityTarget ?? "no target set",
                 r.ByAssignee, r.ByProject, r.ByType,
                 OpenTasks = r.OpenTasks.Select(t => Line(t, tz)),
             };

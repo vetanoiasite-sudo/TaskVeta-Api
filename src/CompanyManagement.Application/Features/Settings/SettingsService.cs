@@ -12,17 +12,26 @@ public record SettingsDto(
     string CompanyName, string TimeZoneId, bool AllowMultipleShifts, int MaxShiftsPerDay, int TaskDeadlineReminderHours,
     int AttendanceFinalizeDelayMinutes, VerificationPolicy VerificationPolicy, bool RequireVerificationOnCheckOut,
     bool GeofenceEnabled, double? OfficeLatitude, double? OfficeLongitude, int GeofenceRadiusMeters, int MaxLocationAccuracyMeters,
-    bool NetworkCheckEnabled, string? AllowedIpRanges, bool QrCodeEnabled, int QrRotationSeconds, DateTime UpdatedAt);
+    bool NetworkCheckEnabled, string? AllowedIpRanges, bool QrCodeEnabled, int QrRotationSeconds, DateTime UpdatedAt,
+    int SprintLengthDays, CapacityTargetDto? CapacityTarget);
+
+/// <summary>How the company wants sprint capacity split (% of estimated days): new features, improvements (incl. tech debt), bugs.</summary>
+public record CapacityTargetDto(int New, int Improve, int Bugs)
+{
+    public static CapacityTargetDto? From(CompanySettings s) =>
+        s.CapacityNewPercent is int n && s.CapacityImprovePercent is int i && s.CapacityBugsPercent is int b ? new(n, i, b) : null;
+}
 
 /// <summary>Subset of settings every authenticated user needs (e.g. to know which verification to perform).</summary>
 public record PublicSettingsDto(string CompanyName, string TimeZoneId, bool AllowMultipleShifts, VerificationPolicy VerificationPolicy,
-    bool RequireVerificationOnCheckOut, bool GeofenceEnabled, bool NetworkCheckEnabled, bool QrCodeEnabled);
+    bool RequireVerificationOnCheckOut, bool GeofenceEnabled, bool NetworkCheckEnabled, bool QrCodeEnabled, int SprintLengthDays = 7);
 
 public record UpdateSettingsRequest(
     string CompanyName, string TimeZoneId, bool AllowMultipleShifts, int MaxShiftsPerDay, int TaskDeadlineReminderHours,
     int AttendanceFinalizeDelayMinutes, VerificationPolicy VerificationPolicy, bool RequireVerificationOnCheckOut,
     bool GeofenceEnabled, double? OfficeLatitude, double? OfficeLongitude, int GeofenceRadiusMeters, int MaxLocationAccuracyMeters,
-    bool NetworkCheckEnabled, string? AllowedIpRanges, bool QrCodeEnabled, int QrRotationSeconds);
+    bool NetworkCheckEnabled, string? AllowedIpRanges, bool QrCodeEnabled, int QrRotationSeconds,
+    int SprintLengthDays = 7, CapacityTargetDto? CapacityTarget = null);
 
 public record TimeZoneDto(string Id, string DisplayName);
 
@@ -70,6 +79,15 @@ public class UpdateSettingsRequestValidator : AbstractValidator<UpdateSettingsRe
         RuleFor(x => x.GeofenceRadiusMeters).InclusiveBetween(10, 10000);
         RuleFor(x => x.MaxLocationAccuracyMeters).InclusiveBetween(5, 5000);
         RuleFor(x => x.QrRotationSeconds).InclusiveBetween(10, 600);
+        RuleFor(x => x.SprintLengthDays).InclusiveBetween(1, 30);
+        When(x => x.CapacityTarget is not null, () =>
+        {
+            RuleFor(x => x.CapacityTarget!.New).InclusiveBetween(0, 100).OverridePropertyName("CapacityTarget");
+            RuleFor(x => x.CapacityTarget!.Improve).InclusiveBetween(0, 100).OverridePropertyName("CapacityTarget");
+            RuleFor(x => x.CapacityTarget!.Bugs).InclusiveBetween(0, 100).OverridePropertyName("CapacityTarget");
+            RuleFor(x => x.CapacityTarget).Must(t => t!.New + t.Improve + t.Bugs == 100)
+                .WithMessage("The capacity target must add up to 100%.");
+        });
         When(x => x.GeofenceEnabled, () =>
         {
             RuleFor(x => x.OfficeLatitude).NotNull().InclusiveBetween(-90, 90);
@@ -109,7 +127,7 @@ public class SettingsService(IApplicationDbContext db, IAuditService audit, ICom
     {
         var s = await GetEntityAsync(ct);
         return new PublicSettingsDto(s.CompanyName, s.TimeZoneId, s.AllowMultipleShifts, s.VerificationPolicy,
-            s.RequireVerificationOnCheckOut, s.GeofenceEnabled, s.NetworkCheckEnabled, s.QrCodeEnabled);
+            s.RequireVerificationOnCheckOut, s.GeofenceEnabled, s.NetworkCheckEnabled, s.QrCodeEnabled, s.SprintLengthDays);
     }
 
     public async Task<SettingsDto> UpdateAsync(UpdateSettingsRequest r, CancellationToken ct = default)
@@ -133,6 +151,10 @@ public class SettingsService(IApplicationDbContext db, IAuditService audit, ICom
         s.AllowedIpRanges = r.AllowedIpRanges?.Trim();
         s.QrCodeEnabled = r.QrCodeEnabled;
         s.QrRotationSeconds = r.QrRotationSeconds;
+        s.SprintLengthDays = r.SprintLengthDays;
+        s.CapacityNewPercent = r.CapacityTarget?.New;
+        s.CapacityImprovePercent = r.CapacityTarget?.Improve;
+        s.CapacityBugsPercent = r.CapacityTarget?.Bugs;
         if (string.IsNullOrEmpty(s.QrSecret)) s.QrSecret = NewSecret();
         audit.Log("Update", "SystemSettings", s.Id, old, r);
         await db.SaveChangesAsync(ct);
@@ -158,5 +180,5 @@ public class SettingsService(IApplicationDbContext db, IAuditService audit, ICom
         s.CompanyName, s.TimeZoneId, s.AllowMultipleShifts, s.MaxShiftsPerDay, s.TaskDeadlineReminderHours,
         s.AttendanceFinalizeDelayMinutes, s.VerificationPolicy, s.RequireVerificationOnCheckOut, s.GeofenceEnabled,
         s.OfficeLatitude, s.OfficeLongitude, s.GeofenceRadiusMeters, s.MaxLocationAccuracyMeters, s.NetworkCheckEnabled,
-        s.AllowedIpRanges, s.QrCodeEnabled, s.QrRotationSeconds, s.UpdatedAt);
+        s.AllowedIpRanges, s.QrCodeEnabled, s.QrRotationSeconds, s.UpdatedAt, s.SprintLengthDays, CapacityTargetDto.From(s));
 }

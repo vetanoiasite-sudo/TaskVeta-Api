@@ -17,9 +17,10 @@ public class TaskVetaPrompts
           Anyone stuck marks the task Blocked with the reason.
         - A feature is a parent task with sub-tasks per discipline (UI/UX → Backend → Frontend/Mobile → QA), linked with dependencies.
           Reference the BR story (US-…) and the screen code (SCR-…) when known. Estimates are in working days.
-        - Sprints are company-wide (2 weeks); capacity target: 60% new features, 25% improvements, 15% bugs.
-        - Project documents follow the templates: Discovery, BusinessRequirements, Design (the UI/UX documentation), Technical, Testing, Meeting,
-          Client. Figma is the source of truth for the design itself: designs are linked (project / task design URL), never uploaded.
+        - Sprints are company-wide; their default length (1 week unless changed) and an optional capacity target are company settings
+          (sprint_report shows the target, or that none is set).
+        - Project documents follow the templates: Discovery, BusinessRequirements, Design (the UI/UX documentation), Backend, Frontend,
+          Testing, Meeting, Client, plus Technical (other technical notes) and Other. Figma is the source of truth for the design itself: designs are linked (project / task design URL), never uploaded.
 
         Rules:
         - Read freely. Before ANY change (create, edit, status, comment, block, sprint, document), show the user exactly what you will do
@@ -56,7 +57,7 @@ public class TaskVetaPrompts
     [Description("Summarise the current sprint for the team or management.")]
     public static string SprintReview() =>
         "Use sprint_report for the current sprint: completion, what is at risk (blocked, overdue, not started), workload per person, " +
-        "and the capacity split against 60/25/15. End with 3 concrete recommendations.";
+        "and the capacity split (against the company's target if one is set). End with 3 concrete recommendations.";
 
     [McpServerPrompt(Name = "project_status", Title = "Project status for the client")]
     [Description("A weekly status update for a project, ready to send to the client.")]

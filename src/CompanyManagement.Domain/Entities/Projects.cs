@@ -44,7 +44,7 @@ public class ProjectMember : BaseEntity
     public static bool IsLeadRole(ProjectRole role) => role != ProjectRole.Member;
 }
 
-/// <summary>A company-wide iteration (normally two weeks). Tasks from any project can be planned into it.</summary>
+/// <summary>A company-wide iteration (its default length is a company setting, 1 week unless changed). Tasks from any project can be planned into it.</summary>
 public class Sprint : BaseEntity
 {
     public string Name { get; set; } = string.Empty;

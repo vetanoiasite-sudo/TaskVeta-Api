@@ -338,6 +338,15 @@ namespace CompanyManagement.Infrastructure.Persistence.Migrations
                     b.Property<int>("AttendanceFinalizeDelayMinutes")
                         .HasColumnType("integer");
 
+                    b.Property<int?>("CapacityBugsPercent")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("CapacityImprovePercent")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("CapacityNewPercent")
+                        .HasColumnType("integer");
+
                     b.Property<string>("CompanyName")
                         .IsRequired()
                         .HasMaxLength(150)
@@ -381,6 +390,11 @@ namespace CompanyManagement.Infrastructure.Persistence.Migrations
                     b.Property<bool>("RequireVerificationOnCheckOut")
                         .HasColumnType("boolean");
 
+                    b.Property<int>("SprintLengthDays")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(7);
+
                     b.Property<int>("TaskDeadlineReminderHours")
                         .HasColumnType("integer");
 
@@ -397,7 +411,10 @@ namespace CompanyManagement.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("SystemSettings", (string)null);
+                    b.ToTable("SystemSettings", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_SystemSettings_CapacityTarget", "(\"CapacityNewPercent\" IS NULL AND \"CapacityImprovePercent\" IS NULL AND \"CapacityBugsPercent\" IS NULL) OR (\"CapacityNewPercent\" + \"CapacityImprovePercent\" + \"CapacityBugsPercent\" = 100)");
+                        });
                 });
 
             modelBuilder.Entity("CompanyManagement.Domain.Entities.Department", b =>

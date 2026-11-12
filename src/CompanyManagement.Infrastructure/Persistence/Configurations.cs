@@ -200,12 +200,13 @@ public class CompanySettingsConfiguration : IEntityTypeConfiguration<CompanySett
 {
     public void Configure(EntityTypeBuilder<CompanySettings> b)
     {
-        b.ToTable("SystemSettings");
+        b.ToTable("SystemSettings", t => t.HasCheckConstraint("CK_SystemSettings_CapacityTarget", "(\"CapacityNewPercent\" IS NULL AND \"CapacityImprovePercent\" IS NULL AND \"CapacityBugsPercent\" IS NULL) OR (\"CapacityNewPercent\" + \"CapacityImprovePercent\" + \"CapacityBugsPercent\" = 100)"));
         b.Ignore(s => s.EnabledMethods);
         b.Property(s => s.CompanyName).HasMaxLength(150);
         b.Property(s => s.TimeZoneId).HasMaxLength(100);
         b.Property(s => s.AllowedIpRanges).HasMaxLength(4000);
         b.Property(s => s.QrSecret).HasMaxLength(200);
+        b.Property(s => s.SprintLengthDays).HasDefaultValue(7);
     }
 }
 

@@ -138,9 +138,27 @@ public enum ProjectDocumentCategory
     BusinessRequirements = 2,
     /// <summary>The UI/UX documentation (03-UIUX-DESIGN): screens with SCR codes, flows, states. The design itself stays in Figma.</summary>
     Design = 3,
+    /// <summary>Technical notes that are neither backend nor frontend documentation ("Technical (other)").</summary>
     Technical = 4,
     Testing = 5,
     Meeting = 6,
     Client = 7,
-    Other = 8
+    Other = 8,
+    /// <summary>Backend documentation (04-BACKEND).</summary>
+    Backend = 9,
+    /// <summary>Frontend documentation (05-FRONTEND).</summary>
+    Frontend = 10
+}
+
+/// <summary>The order categories are shown in: the order of the documentation templates (01 … 07), then the rest.</summary>
+public static class ProjectDocumentCategories
+{
+    public static readonly ProjectDocumentCategory[] DisplayOrder =
+    [
+        ProjectDocumentCategory.Discovery, ProjectDocumentCategory.BusinessRequirements, ProjectDocumentCategory.Design,
+        ProjectDocumentCategory.Backend, ProjectDocumentCategory.Frontend, ProjectDocumentCategory.Testing, ProjectDocumentCategory.Meeting,
+        ProjectDocumentCategory.Client, ProjectDocumentCategory.Technical, ProjectDocumentCategory.Other,
+    ];
+
+    public static int Rank(ProjectDocumentCategory c) => Array.IndexOf(DisplayOrder, c) is var i and >= 0 ? i : DisplayOrder.Length;
 }

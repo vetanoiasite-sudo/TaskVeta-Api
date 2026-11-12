@@ -66,9 +66,9 @@ public class ProjectDocumentService(
     public async Task<IReadOnlyList<ProjectDocumentDto>> GetAllAsync(int projectId, CancellationToken ct = default)
     {
         await EnsureVisibleAsync(projectId, ct);
-        var docs = await Query(db.ProjectDocuments.Where(d => d.ProjectId == projectId).OrderBy(d => d.Category).ThenByDescending(d => d.CreatedAt))
-            .ToListAsync(ct);
-        return docs.Select(ToDto).ToList();
+        var docs = await Query(db.ProjectDocuments.Where(d => d.ProjectId == projectId).OrderByDescending(d => d.CreatedAt)).ToListAsync(ct);
+        // Template order (Discovery, BR, UI/UX, Backend, Frontend, Testing, …), newest first inside a category.
+        return docs.OrderBy(d => ProjectDocumentCategories.Rank(d.Category)).Select(ToDto).ToList();
     }
 
     public async Task<ProjectDocumentDto> UploadAsync(int projectId, string? title, ProjectDocumentCategory category, string fileName,

@@ -102,6 +102,13 @@ public class CompanySettings : BaseEntity
     public bool AllowMultipleShifts { get; set; }
     public int MaxShiftsPerDay { get; set; } = 1;
     public int TaskDeadlineReminderHours { get; set; } = 24;
+
+    /// <summary>Default length of a new sprint in days (1 week unless the company changes it).</summary>
+    public int SprintLengthDays { get; set; } = 7;
+    /// <summary>Optional capacity target for sprints (% of estimated days). All null = no target; otherwise the three add up to 100.</summary>
+    public int? CapacityNewPercent { get; set; }
+    public int? CapacityImprovePercent { get; set; }
+    public int? CapacityBugsPercent { get; set; }
     /// <summary>Minutes after the schedule end time before missing check-outs / absences are finalized.</summary>
     public int AttendanceFinalizeDelayMinutes { get; set; } = 120;
 

@@ -22,11 +22,12 @@ public record PlanTasksRequest(int[] TaskIds);
 public record SprintBreakdownRow(string Key, string Label, int Tasks, int Completed, decimal EstimateDays, decimal CompletedEstimateDays);
 
 /// <param name="CapacitySplit">Share of estimated days: "new" (Feature), "improve" (Improvement + TechDebt), "bugs" (Bug), "other" (Design + Docs).</param>
+/// <param name="CapacityTarget">The company's capacity target from the settings, or null when none is set.</param>
 /// <param name="Unestimated">Tasks without an estimate (they make the capacity numbers less reliable).</param>
 public record SprintReportDto(SprintDto Sprint, int Total, int Completed, int InProgress, int InReview, int NotStarted, int Rejected,
     int Cancelled, int Blocked, int Overdue, int Unestimated, decimal EstimateDays, decimal CompletedEstimateDays, int CompletionPercent,
     IReadOnlyDictionary<string, int> CapacitySplit, IReadOnlyList<SprintBreakdownRow> ByType, IReadOnlyList<SprintBreakdownRow> ByAssignee,
-    IReadOnlyList<SprintBreakdownRow> ByProject, IReadOnlyList<TaskDto> OpenTasks);
+    IReadOnlyList<SprintBreakdownRow> ByProject, IReadOnlyList<TaskDto> OpenTasks, Settings.CapacityTargetDto? CapacityTarget = null);
 
 public class SaveSprintRequestValidator : AbstractValidator<SaveSprintRequest>
 {
@@ -237,7 +238,10 @@ public class SprintService(IApplicationDbContext db, ITaskService tasks, IAuditS
             list.Count(t => t.Status == TaskItemStatus.Cancelled), open.Count(t => t.IsBlocked), open.Count(t => t.IsOverdue),
             live.Count(t => t.EstimateDays is null), totalDays, doneDays,
             live.Count == 0 ? 0 : (int)Math.Round(live.Count(Done) * 100.0 / live.Count),
-            split, byType, byAssignee, byProject, open);
+            split, byType, byAssignee, byProject, open,
+            await db.CompanySettings.AsNoTracking().OrderBy(s => s.Id).Select(s => s.CapacityNewPercent == null || s.CapacityImprovePercent == null
+                    || s.CapacityBugsPercent == null ? null : new Settings.CapacityTargetDto(s.CapacityNewPercent.Value, s.CapacityImprovePercent.Value,
+                    s.CapacityBugsPercent.Value)).FirstOrDefaultAsync(ct));
     }
 
     private async Task EnsureNoOverlapAsync(int? id, SaveSprintRequest r, CancellationToken ct)

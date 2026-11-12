@@ -25,6 +25,7 @@ public interface IApplicationDbContext
     DbSet<ProjectMember> ProjectMembers { get; }
     DbSet<Sprint> Sprints { get; }
     DbSet<TaskDependency> TaskDependencies { get; }
+    DbSet<TaskCommentReaction> TaskCommentReactions { get; }
     DbSet<TaskItem> Tasks { get; }
     DbSet<TaskAssignment> TaskAssignments { get; }
     DbSet<TaskComment> TaskComments { get; }

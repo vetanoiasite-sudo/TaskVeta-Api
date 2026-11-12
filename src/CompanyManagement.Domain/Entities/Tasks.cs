@@ -113,6 +113,21 @@ public class TaskComment : BaseEntity
     public string Content { get; set; } = string.Empty;
     /// <summary>Users @mentioned in the comment (they get a mention notification).</summary>
     public int[] MentionedUserIds { get; set; } = [];
+    /// <summary>Files sent with the comment: voice notes, pasted screenshots, recordings.</summary>
+    public ICollection<TaskAttachment> Attachments { get; set; } = new List<TaskAttachment>();
+    public ICollection<TaskCommentReaction> Reactions { get; set; } = new List<TaskCommentReaction>();
+}
+
+/// <summary>An emoji reaction on a comment (👍 ❤️ 😂 …). One row per user and emoji.</summary>
+public class TaskCommentReaction : BaseEntity
+{
+    public const int MaxEmojiLength = 16;
+
+    public int CommentId { get; set; }
+    public TaskComment Comment { get; set; } = null!;
+    public int UserId { get; set; }
+    public ApplicationUser User { get; set; } = null!;
+    public string Emoji { get; set; } = string.Empty;
 }
 
 /// <summary>A reviewer's decision on a submitted task: approved (rating required) or rejected (notes required).</summary>
@@ -152,6 +167,11 @@ public class TaskAttachment : BaseEntity
     public string StoredFileName { get; set; } = string.Empty;
     public string ContentType { get; set; } = "application/octet-stream";
     public long SizeBytes { get; set; }
+    /// <summary>The comment this file was sent with (voice note, pasted screenshot); null for files added to the task directly.</summary>
+    public int? CommentId { get; set; }
+    public TaskComment? Comment { get; set; }
+    /// <summary>Length of a voice note / video in seconds, as reported by the recorder.</summary>
+    public int? DurationSeconds { get; set; }
 }
 
 public class TaskHistory : BaseEntity

@@ -24,10 +24,13 @@ public interface ITaskService
     Task<TaskDetailsDto> RemoveDependencyAsync(int id, int blockedByTaskId, CancellationToken ct = default);
     Task DeleteAsync(int id, CancellationToken ct = default);
     Task<TaskCommentDto> AddCommentAsync(int id, AddCommentRequest request, CancellationToken ct = default);
+    /// <summary>Adds or removes the current user's emoji on a comment; returns the comment's reactions.</summary>
+    Task<IReadOnlyList<TaskReactionDto>> ToggleReactionAsync(int id, int commentId, ToggleReactionRequest request, CancellationToken ct = default);
     /// <summary>Records that the current user opened the task (read receipt).</summary>
     Task MarkSeenAsync(int id, CancellationToken ct = default);
     Task<IReadOnlyList<TaskHistoryDto>> GetHistoryAsync(int id, CancellationToken ct = default);
-    Task<TaskAttachmentDto> AddAttachmentAsync(int id, string fileName, string contentType, long size, Stream content, CancellationToken ct = default);
+    Task<TaskAttachmentDto> AddAttachmentAsync(int id, string fileName, string contentType, long size, Stream content, int? durationSeconds = null,
+        CancellationToken ct = default);
     Task<(TaskAttachment Attachment, Stream Content)> OpenAttachmentAsync(int id, int attachmentId, CancellationToken ct = default);
     Task DeleteAttachmentAsync(int id, int attachmentId, CancellationToken ct = default);
     Task<TaskDashboardDto> GetDashboardAsync(bool mine, CancellationToken ct = default);
@@ -55,9 +58,12 @@ public class TaskService(
     INotificationService notifications,
     IFileStorage storage) : ITaskService
 {
-    public static readonly string[] AllowedExtensions =
-        [".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt", ".csv", ".png", ".jpg", ".jpeg", ".gif", ".zip"];
-    public const long MaxAttachmentBytes = 10 * 1024 * 1024;
+    /// <summary>Request limit for uploads; the real limit depends on the kind of file (see <see cref="AttachmentRules"/>).</summary>
+    public const long MaxAttachmentBytes = AttachmentRules.MaxBytes;
+
+    private static readonly Expression<Func<TaskAttachment, TaskAttachmentDto>> AttachmentProjection = a => new TaskAttachmentDto(
+        a.Id, a.FileName, a.ContentType, a.SizeBytes, a.UploadedByUserId, a.UploadedBy.FullName, a.CreatedAt,
+        AttachmentRules.KindOfStored(a.FileName, a.ContentType), a.CommentId, a.DurationSeconds);
 
     private static readonly Dictionary<string, Expression<Func<TaskItem, object?>>> Sorts = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -243,11 +249,15 @@ public class TaskService(
         var task = await LoadVisibleAsync(id, ct);
         var now = clock.UtcNow;
         var dto = await db.Tasks.AsNoTracking().Where(t => t.Id == id).Select(Projection(now)).FirstAsync(ct);
-        var comments = await db.TaskComments.AsNoTracking().Where(c => c.TaskId == id).OrderBy(c => c.CreatedAt)
-            .Select(c => new TaskCommentDto(c.Id, c.UserId, c.User.FullName, c.Content, c.CreatedAt, c.MentionedUserIds)).ToListAsync(ct);
         var attachments = await db.TaskAttachments.AsNoTracking().Where(a => a.TaskId == id).OrderBy(a => a.CreatedAt)
-            .Select(a => new TaskAttachmentDto(a.Id, a.FileName, a.ContentType, a.SizeBytes, a.UploadedByUserId, a.UploadedBy.FullName, a.CreatedAt))
-            .ToListAsync(ct);
+            .Select(AttachmentProjection).ToListAsync(ct);
+        var byComment = attachments.Where(a => a.CommentId != null).ToLookup(a => a.CommentId!.Value);
+        var reactions = await ReactionsAsync(db.TaskCommentReactions.Where(r => r.Comment.TaskId == id), ct);
+        var comments = (await db.TaskComments.AsNoTracking().Where(c => c.TaskId == id).OrderBy(c => c.CreatedAt)
+                .Select(c => new { c.Id, c.UserId, UserName = c.User.FullName, c.Content, c.CreatedAt, c.MentionedUserIds }).ToListAsync(ct))
+            .Select(c => new TaskCommentDto(c.Id, c.UserId, c.UserName, c.Content, c.CreatedAt, c.MentionedUserIds, byComment[c.Id].ToList(),
+                reactions.GetValueOrDefault(c.Id) ?? []))
+            .ToList();
 
         var parent = task.ParentTaskId is int pid
             ? await db.Tasks.AsNoTracking().Where(t => t.Id == pid).Select(RefProjection).FirstOrDefaultAsync(ct)
@@ -585,23 +595,67 @@ public class TaskService(
         if (mentioned.Any(u => !participantIds.Contains(u)))
             throw new BadRequestException("You can only mention people involved in this task.");
 
-        var comment = new TaskComment { TaskId = id, UserId = me, Content = r.Content.Trim(), MentionedUserIds = mentioned };
+        // Files sent with the comment: uploaded by me to this task and not sent with another comment yet.
+        var files = new List<TaskAttachment>();
+        if (r.AttachmentIds is { Length: > 0 } ids)
+        {
+            var wanted = ids.Distinct().ToArray();
+            files = await db.TaskAttachments.Include(a => a.UploadedBy)
+                .Where(a => wanted.Contains(a.Id) && a.TaskId == id && a.UploadedByUserId == me && a.CommentId == null).ToListAsync(ct);
+            if (files.Count != wanted.Length) throw new BadRequestException("Some files cannot be attached to this comment.");
+        }
+        var comment = new TaskComment { TaskId = id, UserId = me, Content = (r.Content ?? "").Trim(), MentionedUserIds = mentioned };
+        foreach (var f in files) comment.Attachments.Add(f);
         db.TaskComments.Add(comment);
         db.TaskHistory.Add(new TaskHistory { TaskId = id, ChangedByUserId = currentUser.UserId, Action = "Commented" });
         await TouchViewAsync(id, me, ct); // the author has obviously seen the task
 
         var name = await db.Users.Where(u => u.Id == me).Select(u => u.FullName).FirstAsync(ct);
+        var preview = comment.Content.Length > 0 ? Excerpt(comment.Content)
+            : files.Any(f => f.ContentType.StartsWith("audio/")) ? "\U0001F3A4 Voice note" : "\U0001F4CE File";
+        var previewAr = comment.Content.Length > 0 ? Excerpt(comment.Content)
+            : files.Any(f => f.ContentType.StartsWith("audio/")) ? "\U0001F3A4 رسالة صوتية" : "\U0001F4CE ملف";
         foreach (var uid in mentioned)
             notifications.Add(uid, NotificationType.TaskMention, "You were mentioned",
-                $"{name} mentioned you in \"{task.Title}\": {Excerpt(comment.Content)}", "تمت الإشارة إليك",
-                $"أشار إليك {name} في المهمة \"{task.Title}\": {Excerpt(comment.Content)}", $"/tasks/{id}", "Task", id);
+                $"{name} mentioned you in \"{task.Title}\": {preview}", "تمت الإشارة إليك",
+                $"أشار إليك {name} في المهمة \"{task.Title}\": {previewAr}", $"/tasks/{id}", "Task", id);
         var recipients = await RelatedUserIdsAsync(task, ct);
         foreach (var uid in recipients.Where(u => u != me && !mentioned.Contains(u)))
             notifications.Add(uid, NotificationType.TaskComment, "New comment",
                 $"{name} commented on \"{task.Title}\".", "تعليق جديد", $"علّق {name} على \"{task.Title}\".",
                 $"/tasks/{id}", "Task", id);
         await notifications.SaveAndDispatchAsync(ct);
-        return new TaskCommentDto(comment.Id, comment.UserId, name, comment.Content, comment.CreatedAt, comment.MentionedUserIds);
+        var dtos = files.Select(f => new TaskAttachmentDto(f.Id, f.FileName, f.ContentType, f.SizeBytes, f.UploadedByUserId, f.UploadedBy.FullName,
+            f.CreatedAt, AttachmentRules.KindOfStored(f.FileName, f.ContentType), comment.Id, f.DurationSeconds)).ToList();
+        return new TaskCommentDto(comment.Id, comment.UserId, name, comment.Content, comment.CreatedAt, comment.MentionedUserIds, dtos, []);
+    }
+
+    public async Task<IReadOnlyList<TaskReactionDto>> ToggleReactionAsync(int id, int commentId, ToggleReactionRequest r, CancellationToken ct = default)
+    {
+        await LoadVisibleAsync(id, ct, includeAssignments: false);
+        if (!await db.TaskComments.AnyAsync(c => c.Id == commentId && c.TaskId == id, ct)) throw new NotFoundException("Comment", commentId);
+        var me = currentUser.UserId!.Value;
+        var emoji = r.Emoji.Trim();
+        var existing = await db.TaskCommentReactions.FirstOrDefaultAsync(x => x.CommentId == commentId && x.UserId == me && x.Emoji == emoji, ct);
+        if (existing is not null) db.TaskCommentReactions.Remove(existing);
+        else
+        {
+            if (await db.TaskCommentReactions.Where(x => x.CommentId == commentId && x.UserId == me).CountAsync(ct) >= 10)
+                throw new BadRequestException("You can add at most 10 reactions to a comment.");
+            db.TaskCommentReactions.Add(new TaskCommentReaction { CommentId = commentId, UserId = me, Emoji = emoji });
+        }
+        try { await db.SaveChangesAsync(ct); }
+        catch (DbUpdateException) { /* double click: the same reaction was added by the other request */ }
+        return (await ReactionsAsync(db.TaskCommentReactions.Where(x => x.CommentId == commentId), ct)).GetValueOrDefault(commentId) ?? [];
+    }
+
+    /// <summary>Reactions grouped per comment, then per emoji in the order they were first used.</summary>
+    private static async Task<Dictionary<int, List<TaskReactionDto>>> ReactionsAsync(IQueryable<TaskCommentReaction> query, CancellationToken ct)
+    {
+        var rows = await query.AsNoTracking().OrderBy(x => x.Id)
+            .Select(x => new { x.CommentId, x.Emoji, x.UserId, Name = x.User.FullName }).ToListAsync(ct);
+        return rows.GroupBy(x => x.CommentId).ToDictionary(g => g.Key, g => g.GroupBy(x => x.Emoji)
+            .Select(e => new TaskReactionDto(e.Key, e.Count(), e.Select(x => new TaskReactionUserDto(x.UserId, x.Name)).ToList())).ToList());
     }
 
     private static string Excerpt(string text) => text.Length <= 120 ? text : text[..117] + "...";
@@ -672,26 +726,45 @@ public class TaskService(
             .ToListAsync(ct);
     }
 
-    public async Task<TaskAttachmentDto> AddAttachmentAsync(int id, string fileName, string contentType, long size, Stream content, CancellationToken ct = default)
+    public async Task<TaskAttachmentDto> AddAttachmentAsync(int id, string fileName, string contentType, long size, Stream content,
+        int? durationSeconds = null, CancellationToken ct = default)
     {
         await LoadVisibleAsync(id, ct);
         var ext = Path.GetExtension(fileName).ToLowerInvariant();
-        if (!AllowedExtensions.Contains(ext)) throw new BadRequestException($"File type '{ext}' is not allowed.");
-        if (size <= 0 || size > MaxAttachmentBytes) throw new BadRequestException("Files must be between 1 byte and 10 MB.");
+        if (!AttachmentRules.IsAllowed(ext)) throw new BadRequestException($"File type '{ext}' is not allowed.");
+        var kind = AttachmentRules.KindOf(ext, contentType);
+        var max = AttachmentRules.MaxSize(kind);
+        if (size <= 0 || size > max) throw new BadRequestException($"{kind} files must be between 1 byte and {max / (1024 * 1024)} MB.");
+
+        // Check the real format of media files (they can be shown inline): read the first bytes, then rewind.
+        if (!content.CanSeek)
+        {
+            var copy = new MemoryStream();
+            await content.CopyToAsync(copy, ct);
+            content = copy;
+        }
+        content.Position = 0;
+        var head = new byte[16];
+        var read = await content.ReadAtLeastAsync(head, head.Length, throwOnEndOfStream: false, ct);
+        if (!AttachmentRules.SignatureMatches(ext, head[..read]))
+            throw new BadRequestException($"The file content does not match its '{ext}' extension.");
+        content.Position = 0;
 
         var stored = await storage.SaveAsync(content, ext, ct);
         var safeName = Path.GetFileName(fileName).Replace("\"", "");
         var att = new TaskAttachment
         {
             TaskId = id, UploadedByUserId = currentUser.UserId!.Value, FileName = safeName.Length > 255 ? safeName[^255..] : safeName,
-            StoredFileName = stored, ContentType = string.IsNullOrWhiteSpace(contentType) ? "application/octet-stream" : contentType, SizeBytes = size
+            StoredFileName = stored, ContentType = AttachmentRules.SafeContentType(ext, kind), SizeBytes = size,
+            DurationSeconds = durationSeconds is > 0 and < 24 * 3600 ? durationSeconds : null,
         };
         db.TaskAttachments.Add(att);
         db.TaskHistory.Add(new TaskHistory { TaskId = id, ChangedByUserId = currentUser.UserId, Action = "AttachmentAdded", Details = att.FileName });
         try { await db.SaveChangesAsync(ct); }
         catch { storage.Delete(stored); throw; }
         var name = await db.Users.Where(u => u.Id == att.UploadedByUserId).Select(u => u.FullName).FirstAsync(ct);
-        return new TaskAttachmentDto(att.Id, att.FileName, att.ContentType, att.SizeBytes, att.UploadedByUserId, name, att.CreatedAt);
+        return new TaskAttachmentDto(att.Id, att.FileName, att.ContentType, att.SizeBytes, att.UploadedByUserId, name, att.CreatedAt, kind, null,
+            att.DurationSeconds);
     }
 
     public async Task<(TaskAttachment Attachment, Stream Content)> OpenAttachmentAsync(int id, int attachmentId, CancellationToken ct = default)

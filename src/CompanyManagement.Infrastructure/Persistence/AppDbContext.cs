@@ -23,6 +23,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, TimeProvider t
     public DbSet<ProjectMember> ProjectMembers => Set<ProjectMember>();
     public DbSet<Sprint> Sprints => Set<Sprint>();
     public DbSet<TaskDependency> TaskDependencies => Set<TaskDependency>();
+    public DbSet<TaskCommentReaction> TaskCommentReactions => Set<TaskCommentReaction>();
     public DbSet<TaskItem> Tasks => Set<TaskItem>();
     public DbSet<TaskAssignment> TaskAssignments => Set<TaskAssignment>();
     public DbSet<TaskComment> TaskComments => Set<TaskComment>();

@@ -18,13 +18,23 @@ public record TaskDto(int Id, string Key, string Title, TaskType Type, TaskPrior
 /// <summary>A short reference to another task (parent, sub-task, dependency).</summary>
 public record TaskRefDto(int Id, string Key, string Title, TaskType Type, TaskItemStatus Status);
 
-public record TaskCommentDto(int Id, int UserId, string UserName, string Content, DateTime CreatedAt, int[] MentionedUserIds);
+public record TaskCommentDto(int Id, int UserId, string UserName, string Content, DateTime CreatedAt, int[] MentionedUserIds,
+    IReadOnlyList<TaskAttachmentDto> Attachments, IReadOnlyList<TaskReactionDto> Reactions);
+
+public record TaskReactionUserDto(int UserId, string Name);
+/// <summary>One emoji on a comment with who used it.</summary>
+public record TaskReactionDto(string Emoji, int Count, IReadOnlyList<TaskReactionUserDto> Users);
+
+/// <summary>Adds the emoji to the comment, or removes it if you already reacted with it.</summary>
+public record ToggleReactionRequest(string Emoji);
 
 /// <summary>Someone involved in a task (can be @mentioned) with read receipts. Role: Assignee, Creator, Leader or ProjectLead.</summary>
 public record TaskParticipantDto(int UserId, string Name, int? EmployeeId, string Role, DateTime? FirstSeenAt, DateTime? LastSeenAt);
 
+/// <param name="Kind">Document, Image, Audio or Video. Media can be previewed inline (GET …/attachments/{id}?inline=true).</param>
+/// <param name="CommentId">Set when the file was sent with a comment (voice note, pasted screenshot).</param>
 public record TaskAttachmentDto(int Id, string FileName, string ContentType, long SizeBytes, int UploadedByUserId, string UploadedByName,
-    DateTime CreatedAt);
+    DateTime CreatedAt, AttachmentKind Kind, int? CommentId, int? DurationSeconds);
 
 public record TaskHistoryDto(int Id, string Action, TaskItemStatus? FromStatus, TaskItemStatus? ToStatus, string? Details,
     string? ChangedBy, DateTime CreatedAt);
@@ -90,7 +100,8 @@ public record ProjectTaskStats(int Total, int Completed, int Overdue, int Progre
 /// <summary>Rating (1–10) is required when approving (Completed) and optional when rejecting.</summary>
 public record UpdateTaskStatusRequest(TaskItemStatus Status, string? Note, int? ProgressPercent, int? Rating = null);
 public record UpdateTaskProgressRequest(int ProgressPercent, string? Note);
-public record AddCommentRequest(string Content, int[]? MentionedUserIds = null);
+/// <param name="AttachmentIds">Files you uploaded to this task (not yet sent with a comment) to attach — e.g. a voice note. Text is optional then.</param>
+public record AddCommentRequest(string? Content, int[]? MentionedUserIds = null, int[]? AttachmentIds = null);
 /// <summary>Flag or clear Blocked. A reason is required when blocking.</summary>
 public record SetTaskBlockedRequest(bool IsBlocked, string? Reason);
 /// <summary>Move a task to a sprint (or to the backlog with null).</summary>
@@ -197,8 +208,22 @@ public class AddCommentRequestValidator : AbstractValidator<AddCommentRequest>
 {
     public AddCommentRequestValidator()
     {
-        RuleFor(x => x.Content).NotEmpty().MaximumLength(4000);
+        RuleFor(x => x.Content).NotEmpty().When(x => x.AttachmentIds is not { Length: > 0 }).WithMessage("Write a comment or attach a file.");
+        RuleFor(x => x.Content).MaximumLength(4000);
         RuleFor(x => x.MentionedUserIds).Must(m => m is null || m.Length <= 50).WithMessage("Too many mentions.");
+        RuleFor(x => x.AttachmentIds).Must(a => a is null || a.Length <= 10).WithMessage("At most 10 files per comment.");
+    }
+}
+
+public class ToggleReactionRequestValidator : AbstractValidator<ToggleReactionRequest>
+{
+    public ToggleReactionRequestValidator()
+    {
+        // An emoji (possibly with skin tone / variation selectors / ZWJ): no letters, digits, spaces or markup.
+        RuleFor(x => x.Emoji).NotEmpty().MaximumLength(Domain.Entities.TaskCommentReaction.MaxEmojiLength)
+            .Must(e => e is not null && e.All(c => !char.IsLetterOrDigit(c) && !char.IsWhiteSpace(c) && c != '<' && c != '>' && c != '&')
+                       && e.Any(c => char.IsSurrogate(c) || c > 0x2000))
+            .WithMessage("Pick an emoji.");
     }
 }
 

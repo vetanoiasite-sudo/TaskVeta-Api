@@ -97,6 +97,11 @@ public class TasksController(ITaskService tasks, IExportService export) : Contro
     public async Task<ActionResult<TaskDetailsDto>> RemoveDependency(int id, int blockedByTaskId, CancellationToken ct) =>
         Ok(await tasks.RemoveDependencyAsync(id, blockedByTaskId, ct));
 
+    /// <summary>React to a comment with an emoji (toggle). Returns the comment's reactions.</summary>
+    [HttpPost("{id:int}/comments/{commentId:int}/reactions")]
+    public async Task<ActionResult<IReadOnlyList<TaskReactionDto>>> React(int id, int commentId, ToggleReactionRequest request, CancellationToken ct) =>
+        Ok(await tasks.ToggleReactionAsync(id, commentId, request, ct));
+
     [HttpPost("{id:int}/comments")]
     public async Task<ActionResult<TaskCommentDto>> AddComment(int id, AddCommentRequest request, CancellationToken ct) =>
         Ok(await tasks.AddCommentAsync(id, request, ct));
@@ -112,22 +117,37 @@ public class TasksController(ITaskService tasks, IExportService export) : Contro
     [HttpGet("{id:int}/history")]
     public async Task<ActionResult<IReadOnlyList<TaskHistoryDto>>> History(int id, CancellationToken ct) => Ok(await tasks.GetHistoryAsync(id, ct));
 
+    /// <summary>
+    /// Upload a file: documents (10 MB), images incl. WebP/HEIC (10 MB), audio / voice notes (20 MB), video (50 MB).
+    /// <c>durationSeconds</c>: optional length of a recording. To send it with a comment, pass its id in the comment's attachmentIds.
+    /// </summary>
     [HttpPost("{id:int}/attachments")]
     [RequestSizeLimit(TaskService.MaxAttachmentBytes + 64 * 1024)]
     [RequestFormLimits(MultipartBodyLengthLimit = TaskService.MaxAttachmentBytes + 64 * 1024)]
-    public async Task<ActionResult<TaskAttachmentDto>> Upload(int id, IFormFile file, CancellationToken ct)
+    public async Task<ActionResult<TaskAttachmentDto>> Upload(int id, IFormFile file, [FromForm] int? durationSeconds, CancellationToken ct)
     {
         if (file is null || file.Length == 0) throw new BadRequestException("No file was uploaded.");
         await using var stream = file.OpenReadStream();
-        return Ok(await tasks.AddAttachmentAsync(id, file.FileName, file.ContentType, file.Length, stream, ct));
+        return Ok(await tasks.AddAttachmentAsync(id, file.FileName, file.ContentType, file.Length, stream, durationSeconds, ct));
     }
 
+    /// <summary>
+    /// Download a file. With <c>inline=true</c>, images, audio and video are served for display/playback (with a content type
+    /// fixed by the server and a sandbox CSP); documents are always downloaded.
+    /// </summary>
     [HttpGet("{id:int}/attachments/{attachmentId:int}")]
-    public async Task<IActionResult> Download(int id, int attachmentId, CancellationToken ct)
+    public async Task<IActionResult> Download(int id, int attachmentId, [FromQuery] bool inline = false, CancellationToken ct = default)
     {
         var (att, content) = await tasks.OpenAttachmentAsync(id, attachmentId, ct);
         Response.Headers["X-Content-Type-Options"] = "nosniff";
-        // Always download (never render inline) to avoid stored-XSS via uploaded HTML/SVG.
+        var ext = Path.GetExtension(att.FileName);
+        var mime = AttachmentRules.SafeContentType(ext, AttachmentRules.KindOfStored(att.FileName, att.ContentType));
+        if (inline && AttachmentRules.IsAllowed(ext) && AttachmentRules.IsInlineSafe(mime))
+        {
+            Response.Headers["Content-Security-Policy"] = "sandbox; default-src 'none'";
+            return File(content, mime, enableRangeProcessing: true);
+        }
+        // Everything else downloads (never renders) to avoid stored-XSS via uploaded files.
         return File(content, "application/octet-stream", att.FileName);
     }
 

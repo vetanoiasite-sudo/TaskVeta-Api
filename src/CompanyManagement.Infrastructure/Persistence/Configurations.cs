@@ -254,6 +254,18 @@ public class TaskItemConfiguration : IEntityTypeConfiguration<TaskItem>
     }
 }
 
+public class TaskCommentReactionConfiguration : IEntityTypeConfiguration<TaskCommentReaction>
+{
+    public void Configure(EntityTypeBuilder<TaskCommentReaction> b)
+    {
+        b.ToTable("TaskCommentReactions");
+        b.Property(r => r.Emoji).HasMaxLength(TaskCommentReaction.MaxEmojiLength).IsRequired();
+        b.HasIndex(r => new { r.CommentId, r.UserId, r.Emoji }).IsUnique();
+        b.HasOne(r => r.Comment).WithMany(c => c.Reactions).HasForeignKey(r => r.CommentId).OnDelete(DeleteBehavior.Cascade);
+        b.HasOne(r => r.User).WithMany().HasForeignKey(r => r.UserId).OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
 public class TaskDependencyConfiguration : IEntityTypeConfiguration<TaskDependency>
 {
     public void Configure(EntityTypeBuilder<TaskDependency> b)
@@ -372,6 +384,8 @@ public class TaskAttachmentConfiguration : IEntityTypeConfiguration<TaskAttachme
         b.HasIndex(a => a.TaskId);
         b.HasOne(a => a.Task).WithMany(t => t.Attachments).HasForeignKey(a => a.TaskId).OnDelete(DeleteBehavior.Cascade);
         b.HasOne(a => a.UploadedBy).WithMany().HasForeignKey(a => a.UploadedByUserId).OnDelete(DeleteBehavior.Restrict);
+        b.HasIndex(a => a.CommentId);
+        b.HasOne(a => a.Comment).WithMany(c => c.Attachments).HasForeignKey(a => a.CommentId).OnDelete(DeleteBehavior.SetNull);
     }
 }
 

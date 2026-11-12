@@ -422,6 +422,126 @@ public class DevProcessTests
         Assert.Equal([backlog.Task.Id], result.Items.Select(t => t.Id));
     }
 
+    // ------------------------------------------------------------------ files, voice notes, emoji
+
+    private static readonly byte[] Png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0x0D, 0x49, 0x48, 0x44, 0x52];
+    private static readonly byte[] Webm = [0x1A, 0x45, 0xDF, 0xA3, 0x9F, 0x42, 0x86, 0x81, 0x01, 0x42, 0xF7, 0x81, 0x01, 0x42, 0xF2, 0x81];
+
+    [Theory]
+    [InlineData(".png", AttachmentKind.Image)]
+    [InlineData(".heic", AttachmentKind.Image)]
+    [InlineData(".webp", AttachmentKind.Image)]
+    [InlineData(".m4a", AttachmentKind.Audio)]
+    [InlineData(".webm", AttachmentKind.Audio)]
+    [InlineData(".mp4", AttachmentKind.Video)]
+    [InlineData(".pdf", AttachmentKind.Document)]
+    public void Attachment_kinds_follow_the_extension(string ext, AttachmentKind kind)
+    {
+        Assert.True(AttachmentRules.IsAllowed(ext));
+        Assert.Equal(kind, AttachmentRules.KindOf(ext));
+    }
+
+    [Fact]
+    public void Screen_recordings_in_webm_are_video_and_risky_types_are_refused()
+    {
+        Assert.Equal(AttachmentKind.Video, AttachmentRules.KindOf(".webm", "video/webm"));
+        Assert.Equal("video/webm", AttachmentRules.SafeContentType(".webm", AttachmentKind.Video));
+        Assert.False(AttachmentRules.IsAllowed(".svg"));
+        Assert.False(AttachmentRules.IsAllowed(".html"));
+        Assert.False(AttachmentRules.IsAllowed(".exe"));
+        Assert.False(AttachmentRules.IsInlineSafe("application/pdf"));
+        Assert.True(AttachmentRules.IsInlineSafe("audio/webm"));
+    }
+
+    [Fact]
+    public void Media_content_must_match_its_extension()
+    {
+        Assert.True(AttachmentRules.SignatureMatches(".png", Png));
+        Assert.True(AttachmentRules.SignatureMatches(".webm", Webm));
+        Assert.False(AttachmentRules.SignatureMatches(".png", "<html><script>"u8.ToArray()));
+        Assert.False(AttachmentRules.SignatureMatches(".mp3", "hello world....."u8.ToArray()));
+        Assert.True(AttachmentRules.SignatureMatches(".pdf", "anything"u8.ToArray())); // documents are download-only
+    }
+
+    [Fact]
+    public async Task Fake_images_and_oversized_files_are_rejected()
+    {
+        var w = new World();
+        var task = await w.AsAdmin().Tasks.CreateAsync(NewTask("t", GA, [Dev1]));
+        var dev = w.As(Dev1, Roles.Employee).Tasks;
+        await Assert.ThrowsAsync<BadRequestException>(() =>
+            dev.AddAttachmentAsync(task.Task.Id, "shot.png", "image/png", 20, new MemoryStream("<html>not an image</html>"u8.ToArray())));
+        await Assert.ThrowsAsync<BadRequestException>(() =>
+            dev.AddAttachmentAsync(task.Task.Id, "big.png", "image/png", AttachmentRules.MaxImageBytes + 1, new MemoryStream(Png)));
+        await Assert.ThrowsAsync<BadRequestException>(() =>
+            dev.AddAttachmentAsync(task.Task.Id, "page.svg", "image/svg+xml", 10, new MemoryStream(Png)));
+
+        var ok = await w.As(Dev1, Roles.Employee).Tasks.AddAttachmentAsync(task.Task.Id, "shot.png", "text/html", Png.Length, new MemoryStream(Png));
+        Assert.Equal("image/png", ok.ContentType); // the server decides the content type, not the browser
+        Assert.Equal(AttachmentKind.Image, ok.Kind);
+    }
+
+    [Fact]
+    public async Task A_voice_note_can_be_sent_as_a_comment_without_text()
+    {
+        var w = new World();
+        var task = await w.AsAdmin().Tasks.CreateAsync(NewTask("t", GA, [Dev1]));
+        var voice = await w.As(Dev1, Roles.Employee).Tasks.AddAttachmentAsync(task.Task.Id, "voice.webm", "audio/webm;codecs=opus", Webm.Length,
+            new MemoryStream(Webm), durationSeconds: 12);
+        Assert.Equal(AttachmentKind.Audio, voice.Kind);
+        Assert.Equal(12, voice.DurationSeconds);
+
+        Assert.False(new AddCommentRequestValidator().Validate(new AddCommentRequest("", null, null)).IsValid);
+        Assert.True(new AddCommentRequestValidator().Validate(new AddCommentRequest("", null, [voice.Id])).IsValid);
+
+        var comment = await w.As(Dev1, Roles.Employee).Tasks.AddCommentAsync(task.Task.Id, new AddCommentRequest(null, null, [voice.Id]));
+        Assert.Equal("", comment.Content);
+        Assert.Single(comment.Attachments);
+
+        var details = await w.AsAdmin().Tasks.GetAsync(task.Task.Id);
+        Assert.Equal(voice.Id, details.Comments.Single().Attachments.Single().Id);
+        Assert.Equal(details.Comments.Single().Id, details.Attachments.Single().CommentId);
+
+        // A file can't be re-used by another comment, nor attached by someone who didn't upload it.
+        await Assert.ThrowsAsync<BadRequestException>(() =>
+            w.As(Dev1, Roles.Employee).Tasks.AddCommentAsync(task.Task.Id, new AddCommentRequest("again", null, [voice.Id])));
+        var other = await w.AsAdmin().Tasks.AddAttachmentAsync(task.Task.Id, "a.png", "image/png", Png.Length, new MemoryStream(Png));
+        await Assert.ThrowsAsync<BadRequestException>(() =>
+            w.As(Dev1, Roles.Employee).Tasks.AddCommentAsync(task.Task.Id, new AddCommentRequest("x", null, [other.Id])));
+    }
+
+    [Fact]
+    public async Task Emoji_reactions_toggle_and_show_who_reacted()
+    {
+        var w = new World();
+        var task = await w.AsAdmin().Tasks.CreateAsync(NewTask("t", GA, [Dev1]));
+        var comment = await w.As(Dev1, Roles.Employee).Tasks.AddCommentAsync(task.Task.Id, new AddCommentRequest("Done 🎉"));
+
+        await w.AsAdmin().Tasks.ToggleReactionAsync(task.Task.Id, comment.Id, new ToggleReactionRequest("👍"));
+        var r = await w.As(Dev1, Roles.Employee).Tasks.ToggleReactionAsync(task.Task.Id, comment.Id, new ToggleReactionRequest("👍"));
+        Assert.Equal(2, r.Single().Count);
+        r = await w.As(Dev1, Roles.Employee).Tasks.ToggleReactionAsync(task.Task.Id, comment.Id, new ToggleReactionRequest("👍"));
+        Assert.Equal(1, r.Single().Count); // second click removes it
+        await w.As(Dev1, Roles.Employee).Tasks.ToggleReactionAsync(task.Task.Id, comment.Id, new ToggleReactionRequest("❤️"));
+
+        var details = await w.AsAdmin().Tasks.GetAsync(task.Task.Id);
+        Assert.Equal("Done 🎉", details.Comments.Single().Content);
+        Assert.Equal(["👍", "❤️"], details.Comments.Single().Reactions.Select(x => x.Emoji));
+        await Assert.ThrowsAsync<NotFoundException>(() =>
+            w.As(Outsider, Roles.Employee).Tasks.ToggleReactionAsync(task.Task.Id, comment.Id, new ToggleReactionRequest("👍")));
+    }
+
+    [Theory]
+    [InlineData("👍", true)]
+    [InlineData("❤️", true)]
+    [InlineData("👍🏽", true)]
+    [InlineData("👨‍💻", true)]
+    [InlineData("a", false)]
+    [InlineData("<b>", false)]
+    [InlineData("", false)]
+    public void Only_emojis_are_accepted_as_reactions(string emoji, bool valid) =>
+        Assert.Equal(valid, new ToggleReactionRequestValidator().Validate(new ToggleReactionRequest(emoji)).IsValid);
+
     // ------------------------------------------------------------------ permissions
 
     [Fact]

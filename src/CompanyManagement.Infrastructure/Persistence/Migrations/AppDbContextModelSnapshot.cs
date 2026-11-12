@@ -944,6 +944,9 @@ namespace CompanyManagement.Infrastructure.Persistence.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<int?>("CommentId")
+                        .HasColumnType("integer");
+
                     b.Property<string>("ContentType")
                         .IsRequired()
                         .HasMaxLength(150)
@@ -951,6 +954,9 @@ namespace CompanyManagement.Infrastructure.Persistence.Migrations
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("DurationSeconds")
+                        .HasColumnType("integer");
 
                     b.Property<string>("FileName")
                         .IsRequired()
@@ -975,6 +981,8 @@ namespace CompanyManagement.Infrastructure.Persistence.Migrations
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CommentId");
 
                     b.HasIndex("StoredFileName")
                         .IsUnique();
@@ -1022,6 +1030,41 @@ namespace CompanyManagement.Infrastructure.Persistence.Migrations
                     b.HasIndex("TaskId", "CreatedAt");
 
                     b.ToTable("TaskComments", (string)null);
+                });
+
+            modelBuilder.Entity("CompanyManagement.Domain.Entities.TaskCommentReaction", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("CommentId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Emoji")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("CommentId", "UserId", "Emoji")
+                        .IsUnique();
+
+                    b.ToTable("TaskCommentReactions", (string)null);
                 });
 
             modelBuilder.Entity("CompanyManagement.Domain.Entities.TaskDependency", b =>
@@ -1713,6 +1756,11 @@ namespace CompanyManagement.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("CompanyManagement.Domain.Entities.TaskAttachment", b =>
                 {
+                    b.HasOne("CompanyManagement.Domain.Entities.TaskComment", "Comment")
+                        .WithMany("Attachments")
+                        .HasForeignKey("CommentId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("CompanyManagement.Domain.Entities.TaskItem", "Task")
                         .WithMany("Attachments")
                         .HasForeignKey("TaskId")
@@ -1724,6 +1772,8 @@ namespace CompanyManagement.Infrastructure.Persistence.Migrations
                         .HasForeignKey("UploadedByUserId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.Navigation("Comment");
 
                     b.Navigation("Task");
 
@@ -1745,6 +1795,25 @@ namespace CompanyManagement.Infrastructure.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("Task");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("CompanyManagement.Domain.Entities.TaskCommentReaction", b =>
+                {
+                    b.HasOne("CompanyManagement.Domain.Entities.TaskComment", "Comment")
+                        .WithMany("Reactions")
+                        .HasForeignKey("CommentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("CompanyManagement.Domain.Entities.ApplicationUser", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Comment");
 
                     b.Navigation("User");
                 });
@@ -1998,6 +2067,13 @@ namespace CompanyManagement.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("CompanyManagement.Domain.Entities.Sprint", b =>
                 {
                     b.Navigation("Tasks");
+                });
+
+            modelBuilder.Entity("CompanyManagement.Domain.Entities.TaskComment", b =>
+                {
+                    b.Navigation("Attachments");
+
+                    b.Navigation("Reactions");
                 });
 
             modelBuilder.Entity("CompanyManagement.Domain.Entities.TaskItem", b =>

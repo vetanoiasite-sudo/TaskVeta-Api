@@ -59,12 +59,24 @@ public record EmployeePerformanceDto(int EmployeeId, string EmployeeCode, string
     double AttendanceRate, double PunctualityRate, decimal TotalHours, int AbsentDays, int LateDays, int TasksAssigned,
     int TasksCompleted, int TasksCompletedOnTime, int TasksOverdue, double TaskCompletionRate, double OnTimeRate, double Score);
 
+/// <summary>One approval / rejection in the period.</summary>
+public record TaskReviewRowDto(int ReviewId, int TaskId, string TaskTitle, string? ProjectName, string? DepartmentName, string Assignees,
+    string ReviewerName, bool Approved, int? Rating, string? Notes, DateTime ReviewedAt);
+
+/// <summary>Per employee: reviews of tasks they were assigned to, in the period.</summary>
+public record EmployeeReviewStatsDto(int EmployeeId, string EmployeeCode, string EmployeeName, string DepartmentName, int Reviews,
+    int Approved, int Rejected, double? AverageRating, int? MinRating, int? MaxRating, double ApprovalRate);
+
+public record TaskReviewReportDto(DateOnly From, DateOnly To, int Reviews, int Approved, int Rejected, double? AverageRating,
+    IReadOnlyList<EmployeeReviewStatsDto> ByEmployee, IReadOnlyList<TaskReviewRowDto> Items);
+
 public interface IReportService
 {
     Task<AttendanceReportDto> AttendanceAsync(ReportQuery q, CancellationToken ct = default);
     Task<IReadOnlyList<AbsenceDto>> AbsenceAsync(ReportQuery q, CancellationToken ct = default);
     Task<TaskReportDto> TasksAsync(ReportQuery q, CancellationToken ct = default);
     Task<IReadOnlyList<EmployeePerformanceDto>> EmployeePerformanceAsync(ReportQuery q, CancellationToken ct = default);
+    Task<TaskReviewReportDto> TaskReviewsAsync(ReportQuery q, CancellationToken ct = default);
 }
 
 public class ReportService(IApplicationDbContext db, IAccessScope scope, ICompanyClock clock, IAttendanceService attendance) : IReportService
@@ -254,6 +266,51 @@ public class ReportService(IApplicationDbContext db, IAccessScope scope, ICompan
                 r.PunctualityRate, r.TotalHours, r.AbsentDays, r.LateDays, t?.Assigned ?? 0, t?.Completed ?? 0, t?.CompletedOnTime ?? 0,
                 t?.Overdue ?? 0, taskCompletion, onTime, Math.Round(score, 1));
         }).OrderByDescending(p => p.Score).ToList();
+    }
+
+    /// <summary>Approvals / rejections made in the period on tasks assigned to employees in scope (and matching the filters).</summary>
+    public async Task<TaskReviewReportDto> TaskReviewsAsync(ReportQuery q, CancellationToken ct = default)
+    {
+        var (from, to) = await RangeAsync(q, ct);
+        var fromUtc = from.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+        var toUtc = to.AddDays(1).ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+        // Task scope: everyone for admins; for department heads / team leaders / managers their own staff and team members.
+        var scoped = (await scope.TaskScopedEmployeesAsync(ct)).Where(e => e.IsActive);
+        if (q.DepartmentId is int d) scoped = scoped.Where(e => e.DepartmentId == d);
+        if (q.TeamId is int t) scoped = scoped.Where(e => e.TeamMemberships.Any(m => m.TeamId == t));
+        if (q.EmployeeId is int empId) scoped = scoped.Where(e => e.Id == empId);
+        var employees = await AttendanceService.SlimAsync(scoped, ct);
+        var ids = employees.Select(e => e.Id).ToList();
+
+        var rows = await db.TaskReviews.AsNoTracking()
+            .Where(r => r.CreatedAt >= fromUtc && r.CreatedAt < toUtc && r.Task.Assignments.Any(a => ids.Contains(a.EmployeeId)))
+            .OrderByDescending(r => r.CreatedAt)
+            .Select(r => new
+            {
+                r.Id, r.TaskId, r.Task.Title, Project = r.Task.Project != null ? r.Task.Project.Name : null,
+                Department = r.Task.Department != null ? r.Task.Department.Name : null,
+                Assignees = r.Task.Assignments.Select(a => new { a.EmployeeId, Name = a.Employee.FirstName + " " + a.Employee.LastName }).ToList(),
+                Reviewer = r.Reviewer.FullName, r.Approved, r.Rating, r.Notes, r.CreatedAt,
+            })
+            .Take(20_000).ToListAsync(ct);
+
+        var items = rows.Select(r => new TaskReviewRowDto(r.Id, r.TaskId, r.Title, r.Project, r.Department,
+            string.Join(", ", r.Assignees.Select(a => a.Name)), r.Reviewer, r.Approved, r.Rating, r.Notes, r.CreatedAt)).ToList();
+
+        var byEmployee = employees.Select(e =>
+        {
+            var mine = rows.Where(r => r.Assignees.Any(a => a.EmployeeId == e.Id)).ToList();
+            var ratings = mine.Where(r => r.Rating.HasValue).Select(r => r.Rating!.Value).ToList();
+            var approved = mine.Count(r => r.Approved);
+            return new EmployeeReviewStatsDto(e.Id, e.EmployeeCode, e.Name, e.DepartmentName, mine.Count, approved, mine.Count - approved,
+                ratings.Count == 0 ? null : Math.Round(ratings.Average(), 1), ratings.Count == 0 ? null : ratings.Min(),
+                ratings.Count == 0 ? null : ratings.Max(), Rate(approved, mine.Count));
+        }).Where(s => s.Reviews > 0).OrderByDescending(s => s.AverageRating ?? 0).ThenByDescending(s => s.Reviews).ToList();
+
+        var allRatings = rows.Where(r => r.Rating.HasValue).Select(r => r.Rating!.Value).ToList();
+        var totalApproved = rows.Count(r => r.Approved);
+        return new TaskReviewReportDto(from, to, rows.Count, totalApproved, rows.Count - totalApproved,
+            allRatings.Count == 0 ? null : Math.Round(allRatings.Average(), 1), byEmployee, items);
     }
 
     private static double Rate(int part, int whole) => whole <= 0 ? 0 : Math.Round(100.0 * Math.Max(0, part) / whole, 1);

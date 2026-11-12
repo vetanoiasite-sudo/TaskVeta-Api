@@ -45,6 +45,15 @@ public enum TaskPriority
     Urgent = 4
 }
 
+public enum ProjectStatus
+{
+    Planned = 1,
+    Active = 2,
+    OnHold = 3,
+    Completed = 4,
+    Cancelled = 5
+}
+
 public enum TaskItemStatus
 {
     New = 1,
@@ -85,5 +94,6 @@ public enum NotificationType
     AttendanceUpdated = 8,
     AttendanceAttention = 9,
     LeaveRequest = 10,
-    System = 11
+    System = 11,
+    TaskMention = 12
 }

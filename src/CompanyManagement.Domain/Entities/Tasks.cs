@@ -22,6 +22,10 @@ public class TaskItem : BaseEntity
     public int? TeamId { get; set; }
     public Team? Team { get; set; }
 
+    /// <summary>Optional project the task belongs to.</summary>
+    public int? ProjectId { get; set; }
+    public Project? Project { get; set; }
+
     public TaskPriority Priority { get; set; } = TaskPriority.Medium;
     public TaskItemStatus Status { get; set; } = TaskItemStatus.New;
     public int ProgressPercent { get; set; }
@@ -30,6 +34,8 @@ public class TaskItem : BaseEntity
     public DateTime? DueDate { get; set; }
     public DateTime? CompletionDate { get; set; }
     public string? ReviewNotes { get; set; }
+    /// <summary>Rating (1–10) given by the reviewer when the task was approved.</summary>
+    public int? Rating { get; set; }
 
     public DateTime? DeadlineReminderSentAt { get; set; }
     public DateTime? OverdueNotifiedAt { get; set; }
@@ -41,6 +47,7 @@ public class TaskItem : BaseEntity
     public ICollection<TaskComment> Comments { get; set; } = new List<TaskComment>();
     public ICollection<TaskAttachment> Attachments { get; set; } = new List<TaskAttachment>();
     public ICollection<TaskHistory> History { get; set; } = new List<TaskHistory>();
+    public ICollection<TaskReview> Reviews { get; set; } = new List<TaskReview>();
 
     public bool IsClosed => Status is TaskItemStatus.Completed or TaskItemStatus.Cancelled;
     public bool IsOverdue(DateTime utcNow) => !IsClosed && DueDate.HasValue && DueDate.Value < utcNow;
@@ -62,6 +69,34 @@ public class TaskComment : BaseEntity
     public int UserId { get; set; }
     public ApplicationUser User { get; set; } = null!;
     public string Content { get; set; } = string.Empty;
+    /// <summary>Users @mentioned in the comment (they get a mention notification).</summary>
+    public int[] MentionedUserIds { get; set; } = [];
+}
+
+/// <summary>A reviewer's decision on a submitted task: approved (rating required) or rejected (notes required).</summary>
+public class TaskReview : BaseEntity
+{
+    public const int MinRating = 1;
+    public const int MaxRating = 10;
+
+    public int TaskId { get; set; }
+    public TaskItem Task { get; set; } = null!;
+    public int ReviewerUserId { get; set; }
+    public ApplicationUser Reviewer { get; set; } = null!;
+    public bool Approved { get; set; }
+    public int? Rating { get; set; }
+    public string? Notes { get; set; }
+}
+
+/// <summary>Read receipt: when a user first and last opened a task.</summary>
+public class TaskView : BaseEntity
+{
+    public int TaskId { get; set; }
+    public TaskItem Task { get; set; } = null!;
+    public int UserId { get; set; }
+    public ApplicationUser User { get; set; } = null!;
+    public DateTime FirstSeenAt { get; set; }
+    public DateTime LastSeenAt { get; set; }
 }
 
 public class TaskAttachment : BaseEntity

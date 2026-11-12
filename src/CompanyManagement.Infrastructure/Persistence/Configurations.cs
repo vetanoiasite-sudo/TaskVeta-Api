@@ -215,7 +215,11 @@ public class TaskItemConfiguration : IEntityTypeConfiguration<TaskItem>
 {
     public void Configure(EntityTypeBuilder<TaskItem> b)
     {
-        b.ToTable("Tasks", t => t.HasCheckConstraint("CK_Tasks_Progress", "\"ProgressPercent\" BETWEEN 0 AND 100"));
+        b.ToTable("Tasks", t =>
+        {
+            t.HasCheckConstraint("CK_Tasks_Progress", "\"ProgressPercent\" BETWEEN 0 AND 100");
+            t.HasCheckConstraint("CK_Tasks_Rating", "\"Rating\" IS NULL OR \"Rating\" BETWEEN 1 AND 10");
+        });
         b.Ignore(t => t.IsClosed);
         b.Property(t => t.Title).HasMaxLength(200).IsRequired();
         b.Property(t => t.Description).HasMaxLength(4000);
@@ -230,6 +234,22 @@ public class TaskItemConfiguration : IEntityTypeConfiguration<TaskItem>
         b.HasOne(t => t.AssignedTo).WithMany().HasForeignKey(t => t.AssignedToEmployeeId).OnDelete(DeleteBehavior.NoAction);
         b.HasOne(t => t.Department).WithMany().HasForeignKey(t => t.DepartmentId).OnDelete(DeleteBehavior.NoAction);
         b.HasOne(t => t.Team).WithMany().HasForeignKey(t => t.TeamId).OnDelete(DeleteBehavior.SetNull);
+        b.HasIndex(t => t.ProjectId);
+        b.HasOne(t => t.Project).WithMany(p => p.Tasks).HasForeignKey(t => t.ProjectId).OnDelete(DeleteBehavior.SetNull);
+    }
+}
+
+public class ProjectConfiguration : IEntityTypeConfiguration<Project>
+{
+    public void Configure(EntityTypeBuilder<Project> b)
+    {
+        b.ToTable("Projects", t => t.HasCheckConstraint("CK_Projects_Dates", "\"EndDate\" IS NULL OR \"StartDate\" IS NULL OR \"EndDate\" >= \"StartDate\""));
+        b.Property(p => p.Name).HasMaxLength(150).IsRequired();
+        b.Property(p => p.NameAr).HasMaxLength(150);
+        b.Property(p => p.Code).HasMaxLength(20).IsRequired();
+        b.Property(p => p.Description).HasMaxLength(2000);
+        b.HasIndex(p => p.Code).IsUnique();
+        b.HasIndex(p => p.Name);
     }
 }
 
@@ -255,6 +275,31 @@ public class TaskCommentConfiguration : IEntityTypeConfiguration<TaskComment>
         b.HasIndex(c => new { c.TaskId, c.CreatedAt });
         b.HasOne(c => c.Task).WithMany(t => t.Comments).HasForeignKey(c => c.TaskId).OnDelete(DeleteBehavior.Cascade);
         b.HasOne(c => c.User).WithMany().HasForeignKey(c => c.UserId).OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public class TaskReviewConfiguration : IEntityTypeConfiguration<TaskReview>
+{
+    public void Configure(EntityTypeBuilder<TaskReview> b)
+    {
+        b.ToTable("TaskReviews", t => t.HasCheckConstraint("CK_TaskReviews_Rating", "\"Rating\" IS NULL OR \"Rating\" BETWEEN 1 AND 10"));
+        b.Property(r => r.Notes).HasMaxLength(2000);
+        b.HasIndex(r => new { r.TaskId, r.CreatedAt });
+        b.HasIndex(r => r.CreatedAt);
+        b.HasOne(r => r.Task).WithMany(t => t.Reviews).HasForeignKey(r => r.TaskId).OnDelete(DeleteBehavior.Cascade);
+        b.HasOne(r => r.Reviewer).WithMany().HasForeignKey(r => r.ReviewerUserId).OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public class TaskViewConfiguration : IEntityTypeConfiguration<TaskView>
+{
+    public void Configure(EntityTypeBuilder<TaskView> b)
+    {
+        b.ToTable("TaskViews");
+        b.HasIndex(v => new { v.TaskId, v.UserId }).IsUnique();
+        b.HasIndex(v => v.UserId);
+        b.HasOne(v => v.Task).WithMany().HasForeignKey(v => v.TaskId).OnDelete(DeleteBehavior.Cascade);
+        b.HasOne(v => v.User).WithMany().HasForeignKey(v => v.UserId).OnDelete(DeleteBehavior.Cascade);
     }
 }
 

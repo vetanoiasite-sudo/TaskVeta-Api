@@ -689,6 +689,60 @@ namespace CompanyManagement.Infrastructure.Persistence.Migrations
                     b.ToTable("Notifications", (string)null);
                 });
 
+            modelBuilder.Entity("CompanyManagement.Domain.Entities.Project", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateOnly?>("EndDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<string>("NameAr")
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<DateOnly?>("StartDate")
+                        .HasColumnType("date");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Code")
+                        .IsUnique();
+
+                    b.HasIndex("Name");
+
+                    b.ToTable("Projects", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_Projects_Dates", "\"EndDate\" IS NULL OR \"StartDate\" IS NULL OR \"EndDate\" >= \"StartDate\"");
+                        });
+                });
+
             modelBuilder.Entity("CompanyManagement.Domain.Entities.RefreshToken", b =>
                 {
                     b.Property<int>("Id")
@@ -845,6 +899,10 @@ namespace CompanyManagement.Infrastructure.Persistence.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.PrimitiveCollection<int[]>("MentionedUserIds")
+                        .IsRequired()
+                        .HasColumnType("integer[]");
+
                     b.Property<int>("TaskId")
                         .HasColumnType("integer");
 
@@ -949,6 +1007,12 @@ namespace CompanyManagement.Infrastructure.Persistence.Migrations
                     b.Property<int>("ProgressPercent")
                         .HasColumnType("integer");
 
+                    b.Property<int?>("ProjectId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("Rating")
+                        .HasColumnType("integer");
+
                     b.Property<string>("ReviewNotes")
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)");
@@ -986,6 +1050,8 @@ namespace CompanyManagement.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("DepartmentId");
 
+                    b.HasIndex("ProjectId");
+
                     b.HasIndex("TeamId");
 
                     b.HasIndex("Status", "DueDate");
@@ -993,7 +1059,89 @@ namespace CompanyManagement.Infrastructure.Persistence.Migrations
                     b.ToTable("Tasks", null, t =>
                         {
                             t.HasCheckConstraint("CK_Tasks_Progress", "\"ProgressPercent\" BETWEEN 0 AND 100");
+
+                            t.HasCheckConstraint("CK_Tasks_Rating", "\"Rating\" IS NULL OR \"Rating\" BETWEEN 1 AND 10");
                         });
+                });
+
+            modelBuilder.Entity("CompanyManagement.Domain.Entities.TaskReview", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<bool>("Approved")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<int?>("Rating")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ReviewerUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("TaskId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt");
+
+                    b.HasIndex("ReviewerUserId");
+
+                    b.HasIndex("TaskId", "CreatedAt");
+
+                    b.ToTable("TaskReviews", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_TaskReviews_Rating", "\"Rating\" IS NULL OR \"Rating\" BETWEEN 1 AND 10");
+                        });
+                });
+
+            modelBuilder.Entity("CompanyManagement.Domain.Entities.TaskView", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("FirstSeenAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("LastSeenAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("TaskId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("TaskId", "UserId")
+                        .IsUnique();
+
+                    b.ToTable("TaskViews", (string)null);
                 });
 
             modelBuilder.Entity("CompanyManagement.Domain.Entities.Team", b =>
@@ -1414,6 +1562,11 @@ namespace CompanyManagement.Infrastructure.Persistence.Migrations
                         .HasForeignKey("DepartmentId")
                         .OnDelete(DeleteBehavior.NoAction);
 
+                    b.HasOne("CompanyManagement.Domain.Entities.Project", "Project")
+                        .WithMany("Tasks")
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("CompanyManagement.Domain.Entities.Team", "Team")
                         .WithMany()
                         .HasForeignKey("TeamId")
@@ -1425,7 +1578,47 @@ namespace CompanyManagement.Infrastructure.Persistence.Migrations
 
                     b.Navigation("Department");
 
+                    b.Navigation("Project");
+
                     b.Navigation("Team");
+                });
+
+            modelBuilder.Entity("CompanyManagement.Domain.Entities.TaskReview", b =>
+                {
+                    b.HasOne("CompanyManagement.Domain.Entities.ApplicationUser", "Reviewer")
+                        .WithMany()
+                        .HasForeignKey("ReviewerUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("CompanyManagement.Domain.Entities.TaskItem", "Task")
+                        .WithMany("Reviews")
+                        .HasForeignKey("TaskId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Reviewer");
+
+                    b.Navigation("Task");
+                });
+
+            modelBuilder.Entity("CompanyManagement.Domain.Entities.TaskView", b =>
+                {
+                    b.HasOne("CompanyManagement.Domain.Entities.TaskItem", "Task")
+                        .WithMany()
+                        .HasForeignKey("TaskId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("CompanyManagement.Domain.Entities.ApplicationUser", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Task");
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("CompanyManagement.Domain.Entities.Team", b =>
@@ -1539,6 +1732,11 @@ namespace CompanyManagement.Infrastructure.Persistence.Migrations
                     b.Navigation("TeamMemberships");
                 });
 
+            modelBuilder.Entity("CompanyManagement.Domain.Entities.Project", b =>
+                {
+                    b.Navigation("Tasks");
+                });
+
             modelBuilder.Entity("CompanyManagement.Domain.Entities.TaskItem", b =>
                 {
                     b.Navigation("Assignments");
@@ -1548,6 +1746,8 @@ namespace CompanyManagement.Infrastructure.Persistence.Migrations
                     b.Navigation("Comments");
 
                     b.Navigation("History");
+
+                    b.Navigation("Reviews");
                 });
 
             modelBuilder.Entity("CompanyManagement.Domain.Entities.Team", b =>

@@ -21,9 +21,12 @@ public interface IApplicationDbContext
     DbSet<WorkSchedule> WorkSchedules { get; }
     DbSet<Holiday> Holidays { get; }
     DbSet<LeaveRequest> LeaveRequests { get; }
+    DbSet<Project> Projects { get; }
     DbSet<TaskItem> Tasks { get; }
     DbSet<TaskAssignment> TaskAssignments { get; }
     DbSet<TaskComment> TaskComments { get; }
+    DbSet<TaskView> TaskViews { get; }
+    DbSet<TaskReview> TaskReviews { get; }
     DbSet<TaskAttachment> TaskAttachments { get; }
     DbSet<TaskHistory> TaskHistory { get; }
     DbSet<Notification> Notifications { get; }

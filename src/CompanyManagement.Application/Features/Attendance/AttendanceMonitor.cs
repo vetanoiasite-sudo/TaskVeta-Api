@@ -70,11 +70,7 @@ public class AttendanceMonitor(
                     Notes = pending is not null ? $"Pending {pending.Type} leave request #{pending.Id}" : null
                 });
                 absent++;
-                if (e.UserId is int uid)
-                    notifications.Add(uid, NotificationType.AttendanceAttention, "Marked absent",
-                        $"No attendance was recorded for you on {day:yyyy-MM-dd}. Contact HR if this is incorrect.",
-                        "تم تسجيلك غائباً", $"لم يتم تسجيل حضورك يوم {day:yyyy-MM-dd}. تواصل مع الموارد البشرية إن كان ذلك خطأ.",
-                        "/attendance/my", "AttendanceDate", null);
+                // No "Marked absent" notification: the user found it of no value (the absence is still recorded and reported).
             }
         }
 

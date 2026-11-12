@@ -36,6 +36,9 @@ public static class Permissions
     public const string TasksAssign = "tasks.assign";
     public const string TasksReview = "tasks.review";
     public const string TasksViewAll = "tasks.view.all";
+    public const string ProjectsManage = "projects.manage";
+    /// <summary>Task review report (approvals / rejections / ratings), scoped to the people the user manages.</summary>
+    public const string TaskReviewsView = "tasks.reviews.view";
     public const string ReportsView = "reports.view";
     public const string ReportsExport = "reports.export";
     public const string AuditView = "audit.view";
@@ -44,7 +47,7 @@ public static class Permissions
     [
         UsersManage, RolesManage, SettingsManage, DepartmentsManage, TeamsManage, EmployeesView, EmployeesManage,
         AttendanceSelf, AttendanceViewTeam, AttendanceViewAll, AttendanceCorrect, AttendanceKiosk, LeaveApprove,
-        HolidaysManage, TasksAssign, TasksReview, TasksViewAll, ReportsView, ReportsExport, AuditView
+        HolidaysManage, TasksAssign, TasksReview, TasksViewAll, ProjectsManage, TaskReviewsView, ReportsView, ReportsExport, AuditView
     ];
 
     public static readonly IReadOnlyDictionary<string, string[]> ByRole = new Dictionary<string, string[]>
@@ -54,14 +57,14 @@ public static class Permissions
         [
             DepartmentsManage, TeamsManage, EmployeesView, EmployeesManage, AttendanceSelf, AttendanceViewTeam,
             AttendanceViewAll, AttendanceCorrect, AttendanceKiosk, LeaveApprove, HolidaysManage, TasksAssign,
-            TasksReview, TasksViewAll, ReportsView, ReportsExport, AuditView
+            TasksReview, TasksViewAll, ProjectsManage, TaskReviewsView, ReportsView, ReportsExport, AuditView
         ],
         [Roles.Manager] =
         [
-            EmployeesView, AttendanceSelf, AttendanceViewTeam, LeaveApprove, TasksAssign, TasksReview, ReportsView
+            EmployeesView, AttendanceSelf, AttendanceViewTeam, LeaveApprove, TasksAssign, TasksReview, TaskReviewsView, ReportsView
         ],
         [Roles.Employee] = [AttendanceSelf],
-        [Roles.Leader] = [TasksAssign, TasksReview],
+        [Roles.Leader] = [TasksAssign, TasksReview, TaskReviewsView],
     };
 
     public static IEnumerable<string> ForRoles(IEnumerable<string> roles) =>

@@ -75,6 +75,14 @@ public class TasksController(ITaskService tasks, IExportService export) : Contro
     public async Task<ActionResult<TaskCommentDto>> AddComment(int id, AddCommentRequest request, CancellationToken ct) =>
         Ok(await tasks.AddCommentAsync(id, request, ct));
 
+    /// <summary>Read receipt: the current user opened the task.</summary>
+    [HttpPost("{id:int}/seen")]
+    public async Task<IActionResult> Seen(int id, CancellationToken ct)
+    {
+        await tasks.MarkSeenAsync(id, ct);
+        return NoContent();
+    }
+
     [HttpGet("{id:int}/history")]
     public async Task<ActionResult<IReadOnlyList<TaskHistoryDto>>> History(int id, CancellationToken ct) => Ok(await tasks.GetHistoryAsync(id, ct));
 
@@ -112,6 +120,7 @@ public class TasksController(ITaskService tasks, IExportService export) : Contro
         new("Status", t => t.Status.ToString()),
         new("Progress %", t => t.ProgressPercent),
         new("Assignees", t => string.Join(", ", t.Assignees.Select(a => a.FullName))),
+        new("Project", t => t.ProjectName),
         new("Department", t => t.DepartmentName),
         new("Assigned by", t => t.AssignedByName),
         new("Start", t => t.StartDate),

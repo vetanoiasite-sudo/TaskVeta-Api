@@ -19,9 +19,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, TimeProvider t
     public DbSet<WorkSchedule> WorkSchedules => Set<WorkSchedule>();
     public DbSet<Holiday> Holidays => Set<Holiday>();
     public DbSet<LeaveRequest> LeaveRequests => Set<LeaveRequest>();
+    public DbSet<Project> Projects => Set<Project>();
     public DbSet<TaskItem> Tasks => Set<TaskItem>();
     public DbSet<TaskAssignment> TaskAssignments => Set<TaskAssignment>();
     public DbSet<TaskComment> TaskComments => Set<TaskComment>();
+    public DbSet<TaskView> TaskViews => Set<TaskView>();
+    public DbSet<TaskReview> TaskReviews => Set<TaskReview>();
     public DbSet<TaskAttachment> TaskAttachments => Set<TaskAttachment>();
     public DbSet<TaskHistory> TaskHistory => Set<TaskHistory>();
     public DbSet<Notification> Notifications => Set<Notification>();

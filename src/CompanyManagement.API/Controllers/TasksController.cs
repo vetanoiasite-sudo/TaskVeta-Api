@@ -11,8 +11,8 @@ namespace CompanyManagement.API.Controllers;
 [Route("api/tasks")]
 public class TasksController(ITaskService tasks, IExportService export) : ControllerBase
 {
+    /// <summary>Task assigners, and the leads of the chosen project, can create tasks.</summary>
     [HttpPost]
-    [Authorize(Policy = Permissions.TasksAssign)]
     public async Task<ActionResult<TaskDetailsDto>> Create(CreateTaskRequest request, CancellationToken ct)
     {
         var t = await tasks.CreateAsync(request, ct);
@@ -33,8 +33,16 @@ public class TasksController(ITaskService tasks, IExportService export) : Contro
 
     /// <summary>Departments, teams and employees the current user may pick when creating/editing a task.</summary>
     [HttpGet("targets")]
-    [Authorize(Policy = Permissions.TasksAssign)]
-    public async Task<ActionResult<TaskTargetsDto>> Targets(CancellationToken ct) => Ok(await tasks.GetTargetsAsync(ct));
+    public async Task<ActionResult<TaskTargetsDto>> Targets([FromQuery] int? projectId, CancellationToken ct) =>
+        Ok(await tasks.GetTargetsAsync(projectId, ct));
+
+    /// <summary>Labels already used on visible tasks.</summary>
+    [HttpGet("labels")]
+    public async Task<ActionResult<IReadOnlyList<string>>> Labels(CancellationToken ct) => Ok(await tasks.GetLabelsAsync(ct));
+
+    /// <summary>A task by its key, e.g. GA-123 (or #45).</summary>
+    [HttpGet("by-key/{key}")]
+    public async Task<ActionResult<TaskDetailsDto>> GetByKey(string key, CancellationToken ct) => Ok(await tasks.GetByKeyAsync(key, ct));
 
     [HttpGet("dashboard")]
     public async Task<ActionResult<TaskDashboardDto>> Dashboard([FromQuery] bool mine = false, CancellationToken ct = default) =>
@@ -56,7 +64,6 @@ public class TasksController(ITaskService tasks, IExportService export) : Contro
         Ok(await tasks.UpdateAsync(id, request, ct));
 
     [HttpDelete("{id:int}")]
-    [Authorize(Policy = Permissions.TasksAssign)]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
         await tasks.DeleteAsync(id, ct);
@@ -70,6 +77,25 @@ public class TasksController(ITaskService tasks, IExportService export) : Contro
     [HttpPatch("{id:int}/progress")]
     public async Task<ActionResult<TaskDetailsDto>> UpdateProgress(int id, UpdateTaskProgressRequest request, CancellationToken ct) =>
         Ok(await tasks.UpdateProgressAsync(id, request, ct));
+
+    /// <summary>Flag the task as blocked (with what it waits for) or clear it.</summary>
+    [HttpPatch("{id:int}/blocked")]
+    public async Task<ActionResult<TaskDetailsDto>> SetBlocked(int id, SetTaskBlockedRequest request, CancellationToken ct) =>
+        Ok(await tasks.SetBlockedAsync(id, request, ct));
+
+    /// <summary>Move the task to a sprint, or back to the backlog with <c>sprintId: null</c>.</summary>
+    [HttpPatch("{id:int}/sprint")]
+    public async Task<ActionResult<TaskDetailsDto>> SetSprint(int id, SetTaskSprintRequest request, CancellationToken ct) =>
+        Ok(await tasks.SetSprintAsync(id, request, ct));
+
+    /// <summary>This task waits for another task.</summary>
+    [HttpPost("{id:int}/dependencies")]
+    public async Task<ActionResult<TaskDetailsDto>> AddDependency(int id, AddDependencyRequest request, CancellationToken ct) =>
+        Ok(await tasks.AddDependencyAsync(id, request, ct));
+
+    [HttpDelete("{id:int}/dependencies/{blockedByTaskId:int}")]
+    public async Task<ActionResult<TaskDetailsDto>> RemoveDependency(int id, int blockedByTaskId, CancellationToken ct) =>
+        Ok(await tasks.RemoveDependencyAsync(id, blockedByTaskId, ct));
 
     [HttpPost("{id:int}/comments")]
     public async Task<ActionResult<TaskCommentDto>> AddComment(int id, AddCommentRequest request, CancellationToken ct) =>
@@ -114,13 +140,20 @@ public class TasksController(ITaskService tasks, IExportService export) : Contro
 
     private static readonly IReadOnlyList<ExportColumn<TaskDto>> TaskColumns =
     [
-        new("Id", t => t.Id),
+        new("Key", t => t.Key),
         new("Title", t => t.Title),
+        new("Type", t => t.Type.ToString()),
         new("Priority", t => t.Priority.ToString()),
         new("Status", t => t.Status.ToString()),
         new("Progress %", t => t.ProgressPercent),
         new("Assignees", t => string.Join(", ", t.Assignees.Select(a => a.FullName))),
         new("Project", t => t.ProjectName),
+        new("Sprint", t => t.SprintName),
+        new("Estimate (days)", t => t.EstimateDays),
+        new("Blocked", t => t.IsBlocked),
+        new("Story", t => t.StoryRef),
+        new("Screen", t => t.ScreenRef),
+        new("Labels", t => string.Join(", ", t.Labels)),
         new("Department", t => t.DepartmentName),
         new("Assigned by", t => t.AssignedByName),
         new("Start", t => t.StartDate),

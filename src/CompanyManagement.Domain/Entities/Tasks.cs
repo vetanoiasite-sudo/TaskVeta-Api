@@ -26,6 +26,35 @@ public class TaskItem : BaseEntity
     public int? ProjectId { get; set; }
     public Project? Project { get; set; }
 
+    /// <summary>Sequence number inside the project; with the project code it forms the task key (e.g. GA-123). Null without a project.</summary>
+    public int? Number { get; set; }
+
+    public TaskType Type { get; set; } = TaskType.Feature;
+
+    /// <summary>Sprint the task is planned in; null = backlog.</summary>
+    public int? SprintId { get; set; }
+    public Sprint? Sprint { get; set; }
+
+    /// <summary>Parent task when this is a sub-task (one level only).</summary>
+    public int? ParentTaskId { get; set; }
+    public TaskItem? ParentTask { get; set; }
+    public ICollection<TaskItem> Subtasks { get; set; } = new List<TaskItem>();
+
+    /// <summary>Estimate in working days (0.5 steps). Tasks above 3 days should be split.</summary>
+    public decimal? EstimateDays { get; set; }
+    public string[] Labels { get; set; } = [];
+
+    /// <summary>User story id from the project's Business Requirements (e.g. US-CRM-12).</summary>
+    public string? StoryRef { get; set; }
+    /// <summary>Screen id from the UI/UX screen inventory (e.g. SCR-CRM-03).</summary>
+    public string? ScreenRef { get; set; }
+    public string? DesignUrl { get; set; }
+    public string? PullRequestUrl { get; set; }
+
+    public bool IsBlocked { get; set; }
+    public string? BlockedReason { get; set; }
+    public DateTime? BlockedAt { get; set; }
+
     public TaskPriority Priority { get; set; } = TaskPriority.Medium;
     public TaskItemStatus Status { get; set; } = TaskItemStatus.New;
     public int ProgressPercent { get; set; }
@@ -48,9 +77,22 @@ public class TaskItem : BaseEntity
     public ICollection<TaskAttachment> Attachments { get; set; } = new List<TaskAttachment>();
     public ICollection<TaskHistory> History { get; set; } = new List<TaskHistory>();
     public ICollection<TaskReview> Reviews { get; set; } = new List<TaskReview>();
+    /// <summary>Tasks that must be finished before this one (this task is blocked by them).</summary>
+    public ICollection<TaskDependency> BlockedBy { get; set; } = new List<TaskDependency>();
+    /// <summary>Tasks waiting for this one.</summary>
+    public ICollection<TaskDependency> Blocks { get; set; } = new List<TaskDependency>();
 
     public bool IsClosed => Status is TaskItemStatus.Completed or TaskItemStatus.Cancelled;
     public bool IsOverdue(DateTime utcNow) => !IsClosed && DueDate.HasValue && DueDate.Value < utcNow;
+}
+
+/// <summary><see cref="TaskId"/> cannot really finish before <see cref="BlockedByTaskId"/> (e.g. frontend waiting for an API).</summary>
+public class TaskDependency : BaseEntity
+{
+    public int TaskId { get; set; }
+    public TaskItem Task { get; set; } = null!;
+    public int BlockedByTaskId { get; set; }
+    public TaskItem BlockedByTask { get; set; } = null!;
 }
 
 public class TaskAssignment : BaseEntity

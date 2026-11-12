@@ -697,6 +697,10 @@ namespace CompanyManagement.Infrastructure.Persistence.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<string>("ClientName")
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
                     b.Property<string>("Code")
                         .IsRequired()
                         .HasMaxLength(20)
@@ -705,9 +709,20 @@ namespace CompanyManagement.Infrastructure.Persistence.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
                     b.Property<string>("Description")
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("DesignUrl")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("DocsUrl")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
 
                     b.Property<DateOnly?>("EndDate")
                         .HasColumnType("date");
@@ -720,6 +735,10 @@ namespace CompanyManagement.Infrastructure.Persistence.Migrations
                     b.Property<string>("NameAr")
                         .HasMaxLength(150)
                         .HasColumnType("character varying(150)");
+
+                    b.Property<string>("RepositoryUrl")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
 
                     b.Property<DateOnly?>("StartDate")
                         .HasColumnType("date");
@@ -735,12 +754,47 @@ namespace CompanyManagement.Infrastructure.Persistence.Migrations
                     b.HasIndex("Code")
                         .IsUnique();
 
+                    b.HasIndex("CreatedByUserId");
+
                     b.HasIndex("Name");
 
                     b.ToTable("Projects", null, t =>
                         {
                             t.HasCheckConstraint("CK_Projects_Dates", "\"EndDate\" IS NULL OR \"StartDate\" IS NULL OR \"EndDate\" >= \"StartDate\"");
                         });
+                });
+
+            modelBuilder.Entity("CompanyManagement.Domain.Entities.ProjectMember", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("EmployeeId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ProjectId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Role")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EmployeeId");
+
+                    b.HasIndex("ProjectId", "EmployeeId", "Role")
+                        .IsUnique();
+
+                    b.ToTable("ProjectMembers", (string)null);
                 });
 
             modelBuilder.Entity("CompanyManagement.Domain.Entities.RefreshToken", b =>
@@ -796,6 +850,55 @@ namespace CompanyManagement.Infrastructure.Persistence.Migrations
                     b.HasIndex("UserId", "ExpiresAt");
 
                     b.ToTable("RefreshTokens", (string)null);
+                });
+
+            modelBuilder.Entity("CompanyManagement.Domain.Entities.Sprint", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateOnly>("EndDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("Goal")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateOnly>("StartDate")
+                        .HasColumnType("date");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StartDate");
+
+                    b.HasIndex(new[] { "Status" }, "IX_Sprints_SingleActive")
+                        .IsUnique()
+                        .HasFilter("\"Status\" = 2");
+
+                    b.ToTable("Sprints", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_Sprints_Dates", "\"EndDate\" >= \"StartDate\"");
+                        });
                 });
 
             modelBuilder.Entity("CompanyManagement.Domain.Entities.TaskAssignment", b =>
@@ -921,6 +1024,39 @@ namespace CompanyManagement.Infrastructure.Persistence.Migrations
                     b.ToTable("TaskComments", (string)null);
                 });
 
+            modelBuilder.Entity("CompanyManagement.Domain.Entities.TaskDependency", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("BlockedByTaskId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("TaskId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BlockedByTaskId");
+
+                    b.HasIndex("TaskId", "BlockedByTaskId")
+                        .IsUnique();
+
+                    b.ToTable("TaskDependencies", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_TaskDependencies_NotSelf", "\"TaskId\" <> \"BlockedByTaskId\"");
+                        });
+                });
+
             modelBuilder.Entity("CompanyManagement.Domain.Entities.TaskHistory", b =>
                 {
                     b.Property<int>("Id")
@@ -979,6 +1115,13 @@ namespace CompanyManagement.Infrastructure.Persistence.Migrations
                     b.Property<int?>("AssignedToEmployeeId")
                         .HasColumnType("integer");
 
+                    b.Property<DateTime?>("BlockedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("BlockedReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
                     b.Property<DateTime?>("CompletionDate")
                         .HasColumnType("timestamp with time zone");
 
@@ -995,11 +1138,32 @@ namespace CompanyManagement.Infrastructure.Persistence.Migrations
                         .HasMaxLength(4000)
                         .HasColumnType("character varying(4000)");
 
+                    b.Property<string>("DesignUrl")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
                     b.Property<DateTime?>("DueDate")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<decimal?>("EstimateDays")
+                        .HasPrecision(4, 1)
+                        .HasColumnType("numeric(4,1)");
+
+                    b.Property<bool>("IsBlocked")
+                        .HasColumnType("boolean");
+
+                    b.PrimitiveCollection<string[]>("Labels")
+                        .IsRequired()
+                        .HasColumnType("text[]");
+
+                    b.Property<int?>("Number")
+                        .HasColumnType("integer");
+
                     b.Property<DateTime?>("OverdueNotifiedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("ParentTaskId")
+                        .HasColumnType("integer");
 
                     b.Property<int>("Priority")
                         .HasColumnType("integer");
@@ -1009,6 +1173,10 @@ namespace CompanyManagement.Infrastructure.Persistence.Migrations
 
                     b.Property<int?>("ProjectId")
                         .HasColumnType("integer");
+
+                    b.Property<string>("PullRequestUrl")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
 
                     b.Property<int?>("Rating")
                         .HasColumnType("integer");
@@ -1023,11 +1191,22 @@ namespace CompanyManagement.Infrastructure.Persistence.Migrations
                         .HasColumnType("xid")
                         .HasColumnName("xmin");
 
+                    b.Property<string>("ScreenRef")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<int?>("SprintId")
+                        .HasColumnType("integer");
+
                     b.Property<DateTime?>("StartDate")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<int>("Status")
                         .HasColumnType("integer");
+
+                    b.Property<string>("StoryRef")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
 
                     b.Property<int?>("TeamId")
                         .HasColumnType("integer");
@@ -1036,6 +1215,9 @@ namespace CompanyManagement.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
+
+                    b.Property<int>("Type")
+                        .HasColumnType("integer");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -1050,14 +1232,26 @@ namespace CompanyManagement.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("DepartmentId");
 
+                    b.HasIndex("ParentTaskId");
+
                     b.HasIndex("ProjectId");
 
+                    b.HasIndex("SprintId");
+
                     b.HasIndex("TeamId");
+
+                    b.HasIndex("Type");
+
+                    b.HasIndex("ProjectId", "Number")
+                        .IsUnique()
+                        .HasFilter("\"Number\" IS NOT NULL");
 
                     b.HasIndex("Status", "DueDate");
 
                     b.ToTable("Tasks", null, t =>
                         {
+                            t.HasCheckConstraint("CK_Tasks_Estimate", "\"EstimateDays\" IS NULL OR (\"EstimateDays\" > 0 AND \"EstimateDays\" <= 30)");
+
                             t.HasCheckConstraint("CK_Tasks_Progress", "\"ProgressPercent\" BETWEEN 0 AND 100");
 
                             t.HasCheckConstraint("CK_Tasks_Rating", "\"Rating\" IS NULL OR \"Rating\" BETWEEN 1 AND 10");
@@ -1452,6 +1646,35 @@ namespace CompanyManagement.Infrastructure.Persistence.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("CompanyManagement.Domain.Entities.Project", b =>
+                {
+                    b.HasOne("CompanyManagement.Domain.Entities.ApplicationUser", "CreatedBy")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("CreatedBy");
+                });
+
+            modelBuilder.Entity("CompanyManagement.Domain.Entities.ProjectMember", b =>
+                {
+                    b.HasOne("CompanyManagement.Domain.Entities.Employee", "Employee")
+                        .WithMany()
+                        .HasForeignKey("EmployeeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("CompanyManagement.Domain.Entities.Project", "Project")
+                        .WithMany("Members")
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Employee");
+
+                    b.Navigation("Project");
+                });
+
             modelBuilder.Entity("CompanyManagement.Domain.Entities.RefreshToken", b =>
                 {
                     b.HasOne("CompanyManagement.Domain.Entities.ApplicationUser", "User")
@@ -1526,6 +1749,25 @@ namespace CompanyManagement.Infrastructure.Persistence.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("CompanyManagement.Domain.Entities.TaskDependency", b =>
+                {
+                    b.HasOne("CompanyManagement.Domain.Entities.TaskItem", "BlockedByTask")
+                        .WithMany("Blocks")
+                        .HasForeignKey("BlockedByTaskId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("CompanyManagement.Domain.Entities.TaskItem", "Task")
+                        .WithMany("BlockedBy")
+                        .HasForeignKey("TaskId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("BlockedByTask");
+
+                    b.Navigation("Task");
+                });
+
             modelBuilder.Entity("CompanyManagement.Domain.Entities.TaskHistory", b =>
                 {
                     b.HasOne("CompanyManagement.Domain.Entities.ApplicationUser", "ChangedBy")
@@ -1562,9 +1804,19 @@ namespace CompanyManagement.Infrastructure.Persistence.Migrations
                         .HasForeignKey("DepartmentId")
                         .OnDelete(DeleteBehavior.NoAction);
 
+                    b.HasOne("CompanyManagement.Domain.Entities.TaskItem", "ParentTask")
+                        .WithMany("Subtasks")
+                        .HasForeignKey("ParentTaskId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("CompanyManagement.Domain.Entities.Project", "Project")
                         .WithMany("Tasks")
                         .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("CompanyManagement.Domain.Entities.Sprint", "Sprint")
+                        .WithMany("Tasks")
+                        .HasForeignKey("SprintId")
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.HasOne("CompanyManagement.Domain.Entities.Team", "Team")
@@ -1578,7 +1830,11 @@ namespace CompanyManagement.Infrastructure.Persistence.Migrations
 
                     b.Navigation("Department");
 
+                    b.Navigation("ParentTask");
+
                     b.Navigation("Project");
+
+                    b.Navigation("Sprint");
 
                     b.Navigation("Team");
                 });
@@ -1734,6 +1990,13 @@ namespace CompanyManagement.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("CompanyManagement.Domain.Entities.Project", b =>
                 {
+                    b.Navigation("Members");
+
+                    b.Navigation("Tasks");
+                });
+
+            modelBuilder.Entity("CompanyManagement.Domain.Entities.Sprint", b =>
+                {
                     b.Navigation("Tasks");
                 });
 
@@ -1743,11 +2006,17 @@ namespace CompanyManagement.Infrastructure.Persistence.Migrations
 
                     b.Navigation("Attachments");
 
+                    b.Navigation("BlockedBy");
+
+                    b.Navigation("Blocks");
+
                     b.Navigation("Comments");
 
                     b.Navigation("History");
 
                     b.Navigation("Reviews");
+
+                    b.Navigation("Subtasks");
                 });
 
             modelBuilder.Entity("CompanyManagement.Domain.Entities.Team", b =>

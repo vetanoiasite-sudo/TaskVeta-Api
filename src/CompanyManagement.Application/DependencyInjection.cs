@@ -7,6 +7,7 @@ using CompanyManagement.Application.Features.Organization;
 using CompanyManagement.Application.Features.Projects;
 using CompanyManagement.Application.Features.Reports;
 using CompanyManagement.Application.Features.Settings;
+using CompanyManagement.Application.Features.Sprints;
 using CompanyManagement.Application.Features.Tasks;
 using FluentValidation;
 using Microsoft.Extensions.DependencyInjection;
@@ -20,6 +21,8 @@ public static class DependencyInjection
         services.AddValidatorsFromAssembly(typeof(DependencyInjection).Assembly, includeInternalTypes: true);
 
         services.AddScoped<IAccessScope, AccessScope>();
+        services.AddScoped<IProjectAccess, ProjectAccess>();
+        services.AddScoped<ISprintService, SprintService>();
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IDepartmentService, DepartmentService>();
         services.AddScoped<ITeamService, TeamService>();

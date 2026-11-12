@@ -12,10 +12,16 @@ public interface ITaskService
     Task<PagedResult<TaskDto>> GetPagedAsync(TaskQuery query, CancellationToken ct = default);
     Task<IReadOnlyList<TaskDto>> GetAllForExportAsync(TaskQuery query, CancellationToken ct = default);
     Task<TaskDetailsDto> GetAsync(int id, CancellationToken ct = default);
+    /// <summary>Finds a task by its key (e.g. GA-123 or #45).</summary>
+    Task<TaskDetailsDto> GetByKeyAsync(string key, CancellationToken ct = default);
     Task<TaskDetailsDto> CreateAsync(CreateTaskRequest request, CancellationToken ct = default);
     Task<TaskDetailsDto> UpdateAsync(int id, UpdateTaskRequest request, CancellationToken ct = default);
     Task<TaskDetailsDto> ChangeStatusAsync(int id, UpdateTaskStatusRequest request, CancellationToken ct = default);
     Task<TaskDetailsDto> UpdateProgressAsync(int id, UpdateTaskProgressRequest request, CancellationToken ct = default);
+    Task<TaskDetailsDto> SetBlockedAsync(int id, SetTaskBlockedRequest request, CancellationToken ct = default);
+    Task<TaskDetailsDto> SetSprintAsync(int id, SetTaskSprintRequest request, CancellationToken ct = default);
+    Task<TaskDetailsDto> AddDependencyAsync(int id, AddDependencyRequest request, CancellationToken ct = default);
+    Task<TaskDetailsDto> RemoveDependencyAsync(int id, int blockedByTaskId, CancellationToken ct = default);
     Task DeleteAsync(int id, CancellationToken ct = default);
     Task<TaskCommentDto> AddCommentAsync(int id, AddCommentRequest request, CancellationToken ct = default);
     /// <summary>Records that the current user opened the task (read receipt).</summary>
@@ -25,18 +31,24 @@ public interface ITaskService
     Task<(TaskAttachment Attachment, Stream Content)> OpenAttachmentAsync(int id, int attachmentId, CancellationToken ct = default);
     Task DeleteAttachmentAsync(int id, int attachmentId, CancellationToken ct = default);
     Task<TaskDashboardDto> GetDashboardAsync(bool mine, CancellationToken ct = default);
-    Task<TaskTargetsDto> GetTargetsAsync(CancellationToken ct = default);
+    /// <param name="projectId">When the user leads this project, its members are added to the assignable employees.</param>
+    Task<TaskTargetsDto> GetTargetsAsync(int? projectId = null, CancellationToken ct = default);
+    /// <summary>Labels already used on visible tasks (for autocomplete).</summary>
+    Task<IReadOnlyList<string>> GetLabelsAsync(CancellationToken ct = default);
     /// <summary>Task figures per project over all of its tasks.</summary>
     Task<IReadOnlyDictionary<int, ProjectTaskStats>> GetProjectStatsAsync(int? projectId, CancellationToken ct = default);
-    /// <summary>Projects the current user may open: null = all (task admins / project managers); otherwise projects with at least one task they can see.</summary>
+    /// <summary>Projects the current user may open: null = all (task admins / project managers); otherwise member projects, projects they created and projects with a task they can see.</summary>
     Task<int[]?> AccessibleProjectIdsAsync(CancellationToken ct = default);
     /// <summary>All tasks of a project (for its timeline) plus the ids of those the current user may open.</summary>
     Task<(IReadOnlyList<TaskDto> Tasks, int[] OpenableIds)> GetProjectTasksAsync(int projectId, CancellationToken ct = default);
+    /// <summary>Visible tasks of a sprint (for the sprint report).</summary>
+    Task<IReadOnlyList<TaskDto>> GetSprintTasksAsync(int sprintId, CancellationToken ct = default);
 }
 
 public class TaskService(
     IApplicationDbContext db,
     IAccessScope scope,
+    IProjectAccess projectAccess,
     ICurrentUser currentUser,
     ICompanyClock clock,
     IAuditService audit,
@@ -52,6 +64,9 @@ public class TaskService(
         ["title"] = t => t.Title,
         ["priority"] = t => t.Priority,
         ["status"] = t => t.Status,
+        ["type"] = t => t.Type,
+        ["key"] = t => t.Number,
+        ["estimateDays"] = t => t.EstimateDays,
         ["dueDate"] = t => t.DueDate,
         ["startDate"] = t => t.StartDate,
         ["progressPercent"] = t => t.ProgressPercent,
@@ -59,13 +74,40 @@ public class TaskService(
         ["updatedAt"] = t => t.UpdatedAt,
     };
 
-    private Expression<Func<TaskItem, TaskDto>> Projection(DateTime now) => t => new TaskDto(
-        t.Id, t.Title, t.Priority, t.Status, t.ProgressPercent, t.StartDate, t.DueDate, t.CompletionDate,
+    private static Expression<Func<TaskItem, TaskDto>> Projection(DateTime now) => t => new TaskDto(
+        t.Id,
+        t.Project != null && t.Number != null ? t.Project.Code + "-" + t.Number.Value.ToString() : "#" + t.Id.ToString(),
+        t.Title, t.Type, t.Priority, t.Status, t.ProgressPercent, t.StartDate, t.DueDate, t.CompletionDate,
         t.Status != TaskItemStatus.Completed && t.Status != TaskItemStatus.Cancelled && t.DueDate != null && t.DueDate < now,
         t.AssignedByUserId, t.AssignedBy.FullName, t.DepartmentId, t.Department != null ? t.Department.Name : null,
         t.TeamId, t.Team != null ? t.Team.Name : null, t.ProjectId, t.Project != null ? t.Project.Name : null,
+        t.Project != null ? t.Project.Code : null, t.SprintId, t.Sprint != null ? t.Sprint.Name : null, t.ParentTaskId,
+        t.EstimateDays, t.Labels, t.StoryRef, t.ScreenRef, t.IsBlocked, t.BlockedReason,
+        t.Subtasks.Count(), t.Subtasks.Count(s => s.Status == TaskItemStatus.Completed),
+        t.BlockedBy.Count(d => d.BlockedByTask.Status != TaskItemStatus.Completed && d.BlockedByTask.Status != TaskItemStatus.Cancelled),
         t.Assignments.Select(a => new TaskAssigneeDto(a.EmployeeId, a.Employee.EmployeeCode, a.Employee.FirstName + " " + a.Employee.LastName)).ToList(),
         t.Comments.Count, t.Attachments.Count, t.CreatedAt, t.UpdatedAt, t.Rating);
+
+    private static readonly Expression<Func<TaskItem, TaskRefDto>> RefProjection = t => new TaskRefDto(
+        t.Id, t.Project != null && t.Number != null ? t.Project.Code + "-" + t.Number.Value.ToString() : "#" + t.Id.ToString(),
+        t.Title, t.Type, t.Status);
+
+    // ------------------------------------------------------------------ keys
+
+    /// <summary>Parses "GA-123" (project code may itself contain '-': the number is after the last one) or "#45" / "45".</summary>
+    public static bool TryParseKey(string? key, out string? projectCode, out int number)
+    {
+        projectCode = null;
+        number = 0;
+        if (string.IsNullOrWhiteSpace(key)) return false;
+        var k = key.Trim();
+        if (k.StartsWith('#')) return int.TryParse(k[1..], out number) && number > 0;
+        var dash = k.LastIndexOf('-');
+        if (dash <= 0) return int.TryParse(k, out number) && number > 0;
+        if (!int.TryParse(k[(dash + 1)..], out number) || number <= 0) return false;
+        projectCode = k[..dash].ToUpperInvariant();
+        return true;
+    }
 
     // ------------------------------------------------------------------ visibility
 
@@ -74,12 +116,16 @@ public class TaskService(
         if (currentUser.HasPermission(Permissions.TasksViewAll)) return db.Tasks.AsQueryable();
         var userId = currentUser.UserId ?? -1;
         var me = await scope.GetCurrentEmployeeIdAsync(ct) ?? -1;
+        // Project members see every task of their projects.
+        var projects = await projectAccess.MemberProjectIdsAsync(ct);
         if (currentUser.HasPermission(Permissions.TasksAssign))
         {
             var scoped = (await scope.TaskScopedEmployeesAsync(ct)).Select(e => e.Id);
-            return db.Tasks.Where(t => t.AssignedByUserId == userId || t.Assignments.Any(a => scoped.Contains(a.EmployeeId)));
+            return db.Tasks.Where(t => t.AssignedByUserId == userId || t.Assignments.Any(a => scoped.Contains(a.EmployeeId))
+                                       || (t.ProjectId != null && projects.Contains(t.ProjectId.Value)));
         }
-        return db.Tasks.Where(t => t.AssignedByUserId == userId || t.Assignments.Any(a => a.EmployeeId == me));
+        return db.Tasks.Where(t => t.AssignedByUserId == userId || t.Assignments.Any(a => a.EmployeeId == me)
+                                   || (t.ProjectId != null && projects.Contains(t.ProjectId.Value)));
     }
 
     private async Task<TaskItem> LoadVisibleAsync(int id, CancellationToken ct, bool includeAssignments = true)
@@ -89,10 +135,13 @@ public class TaskService(
         return await q.FirstOrDefaultAsync(t => t.Id == id, ct) ?? throw new NotFoundException("Task", id);
     }
 
-    /// <summary>Reviewer = full task admin, the creator, or a manager whose scope covers every assignee.</summary>
+    /// <summary>
+    /// Reviewer = full task admin, a lead of the task's project, the creator, or a manager whose scope covers every assignee.
+    /// </summary>
     private async Task<bool> IsReviewerAsync(TaskItem task, CancellationToken ct)
     {
         if (currentUser.HasPermission(Permissions.TasksViewAll) && currentUser.HasPermission(Permissions.TasksReview)) return true;
+        if (task.ProjectId is int p && await projectAccess.IsLeadAsync(p, ct)) return true;
         if (!currentUser.HasPermission(Permissions.TasksReview)) return false;
         if (task.AssignedByUserId == currentUser.UserId) return true;
         var me = await scope.GetCurrentEmployeeIdAsync(ct);
@@ -108,6 +157,9 @@ public class TaskService(
         var me = await scope.GetCurrentEmployeeIdAsync(ct);
         return me is int id && task.Assignments.Any(a => a.EmployeeId == id);
     }
+
+    private async Task<bool> CanPlanAsync(TaskItem task, CancellationToken ct) =>
+        currentUser.HasPermission(Permissions.SprintsManage) || await IsReviewerAsync(task, ct);
 
     // ------------------------------------------------------------------ queries
 
@@ -135,10 +187,22 @@ public class TaskService(
         if (q.CreatedByMe) query = query.Where(t => t.AssignedByUserId == currentUser.UserId);
         if (q.Status is TaskItemStatus s) query = query.Where(t => t.Status == s);
         if (q.Priority is TaskPriority p) query = query.Where(t => t.Priority == p);
+        if (q.Type is TaskType ty) query = query.Where(t => t.Type == ty);
         if (q.AssigneeId is int a) query = query.Where(t => t.Assignments.Any(x => x.EmployeeId == a));
         if (q.DepartmentId is int d) query = query.Where(t => t.DepartmentId == d);
         if (q.TeamId is int tm) query = query.Where(t => t.TeamId == tm);
         if (q.ProjectId is int pr) query = query.Where(t => t.ProjectId == pr);
+        if (q.SprintId is int sp) query = query.Where(t => t.SprintId == sp);
+        if (q.Backlog)
+            query = query.Where(t => t.SprintId == null && t.Status != TaskItemStatus.Completed && t.Status != TaskItemStatus.Cancelled);
+        if (q.ParentTaskId is int parent) query = query.Where(t => t.ParentTaskId == parent);
+        if (q.TopLevelOnly) query = query.Where(t => t.ParentTaskId == null);
+        if (!string.IsNullOrWhiteSpace(q.Label))
+        {
+            var label = NormalizeLabel(q.Label);
+            query = query.Where(t => t.Labels.Contains(label));
+        }
+        if (q.Blocked is bool blocked) query = query.Where(t => t.IsBlocked == blocked);
         if (q.Overdue == true)
             query = query.Where(t => t.Status != TaskItemStatus.Completed && t.Status != TaskItemStatus.Cancelled && t.DueDate != null && t.DueDate < now);
         if (q.DueFrom is DateTime df) query = query.Where(t => t.DueDate >= df);
@@ -146,9 +210,32 @@ public class TaskService(
         if (!string.IsNullOrWhiteSpace(q.Search))
         {
             var term = q.Search.Trim().ToLower();
-            query = query.Where(t => t.Title.ToLower().Contains(term) || (t.Description != null && t.Description.ToLower().Contains(term)));
+            if (TryParseKey(q.Search, out var code, out var number))
+            {
+                // "GA-12" → that task; "#12" / "12" → task id 12; plus normal text matches.
+                query = code is not null
+                    ? query.Where(t => (t.Project != null && t.Project.Code == code && t.Number == number)
+                                       || t.Title.ToLower().Contains(term))
+                    : query.Where(t => t.Id == number || t.Title.ToLower().Contains(term));
+            }
+            else
+            {
+                query = query.Where(t => t.Title.ToLower().Contains(term) || (t.Description != null && t.Description.ToLower().Contains(term))
+                                         || (t.StoryRef != null && t.StoryRef.ToLower() == term)
+                                         || (t.ScreenRef != null && t.ScreenRef.ToLower() == term));
+            }
         }
         return query;
+    }
+
+    public async Task<TaskDetailsDto> GetByKeyAsync(string key, CancellationToken ct = default)
+    {
+        if (!TryParseKey(key, out var code, out var number)) throw new BadRequestException($"'{key}' is not a task key (e.g. GA-123).");
+        int? id = code is null
+            ? number
+            : await db.Tasks.Where(t => t.Project != null && t.Project.Code == code && t.Number == number).Select(t => (int?)t.Id).FirstOrDefaultAsync(ct);
+        if (id is not int found) throw new NotFoundException("Task", key);
+        return await GetAsync(found, ct);
     }
 
     public async Task<TaskDetailsDto> GetAsync(int id, CancellationToken ct = default)
@@ -162,32 +249,54 @@ public class TaskService(
             .Select(a => new TaskAttachmentDto(a.Id, a.FileName, a.ContentType, a.SizeBytes, a.UploadedByUserId, a.UploadedBy.FullName, a.CreatedAt))
             .ToListAsync(ct);
 
+        var parent = task.ParentTaskId is int pid
+            ? await db.Tasks.AsNoTracking().Where(t => t.Id == pid).Select(RefProjection).FirstOrDefaultAsync(ct)
+            : null;
+        var subtasks = await db.Tasks.AsNoTracking().Where(t => t.ParentTaskId == id).OrderBy(t => t.Id).Select(RefProjection).ToListAsync(ct);
+        var blockedBy = await db.TaskDependencies.AsNoTracking().Where(d => d.TaskId == id).Select(d => d.BlockedByTask)
+            .OrderBy(t => t.Id).Select(RefProjection).ToListAsync(ct);
+        var blocks = await db.TaskDependencies.AsNoTracking().Where(d => d.BlockedByTaskId == id).Select(d => d.Task)
+            .OrderBy(t => t.Id).Select(RefProjection).ToListAsync(ct);
+
         var reviewer = await IsReviewerAsync(task, ct);
         var assignee = await IsAssigneeAsync(task, ct);
         var allowed = Enum.GetValues<TaskItemStatus>().Where(s => TaskWorkflow.CanTransition(task.Status, s, reviewer, assignee)).ToArray();
-        var perms = new TaskPermissionsDto(reviewer, reviewer, (assignee || reviewer) && !task.IsClosed, true, allowed);
+        var perms = new TaskPermissionsDto(reviewer, reviewer, (assignee || reviewer) && !task.IsClosed, true, allowed,
+            (assignee || reviewer) && !task.IsClosed, await CanPlanAsync(task, ct));
         var participants = await ParticipantsAsync(task, ct);
         var reviews = await db.TaskReviews.AsNoTracking().Where(r => r.TaskId == id).OrderByDescending(r => r.CreatedAt)
             .Select(r => new TaskReviewDto(r.Id, r.Approved, r.Rating, r.Notes, r.ReviewerUserId, r.Reviewer.FullName, r.CreatedAt)).ToListAsync(ct);
-        return new TaskDetailsDto(dto, task.Description, task.ReviewNotes, comments, attachments, perms, task.RowVersion.ToString(), participants, reviews);
+        return new TaskDetailsDto(dto, task.Description, task.ReviewNotes, task.DesignUrl, task.PullRequestUrl, parent, subtasks, blockedBy, blocks,
+            comments, attachments, perms, task.RowVersion.ToString(), participants, reviews);
+    }
+
+    public async Task<IReadOnlyList<string>> GetLabelsAsync(CancellationToken ct = default)
+    {
+        var lists = await (await VisibleTasksAsync(ct)).AsNoTracking().Where(t => t.Labels.Length > 0).OrderByDescending(t => t.Id).Select(t => t.Labels).Take(5_000).ToListAsync(ct);
+        return lists.SelectMany(l => l).Distinct().Order().ToList();
     }
 
     // ------------------------------------------------------------------ commands
 
     public async Task<TaskDetailsDto> CreateAsync(CreateTaskRequest r, CancellationToken ct = default)
     {
-        if (!currentUser.HasPermission(Permissions.TasksAssign)) throw new ForbiddenException("You cannot assign tasks.");
-        var assignees = await ValidateAssigneesAsync(r.AssigneeEmployeeIds, ct);
+        var leadsProject = r.ProjectId is int rp && await projectAccess.IsLeadAsync(rp, ct);
+        if (!currentUser.HasPermission(Permissions.TasksAssign) && !leadsProject) throw new ForbiddenException("You cannot assign tasks.");
+        var assignees = await ValidateAssigneesAsync(r.AssigneeEmployeeIds, leadsProject ? r.ProjectId : null, ct);
         var (departmentId, teamId) = await ResolveTargetAsync(r.DepartmentId, r.TeamId, assignees, ct);
         var projectId = await ValidateProjectAsync(r.ProjectId, null, ct);
+        var parentId = await ValidateParentAsync(r.ParentTaskId, null, projectId, ct);
+        var sprintId = await ValidateSprintAsync(r.SprintId, null, ct);
 
         var task = new TaskItem
         {
             Title = r.Title.Trim(), Description = r.Description, Priority = r.Priority, StartDate = r.StartDate, DueDate = r.DueDate,
             DepartmentId = departmentId, TeamId = teamId, ProjectId = projectId, AssignedByUserId = currentUser.UserId!.Value,
             AssignedToEmployeeId = assignees.FirstOrDefault()?.Id,
-            Status = assignees.Count > 0 ? TaskItemStatus.Assigned : TaskItemStatus.New
+            Status = assignees.Count > 0 ? TaskItemStatus.Assigned : TaskItemStatus.New,
+            Type = r.Type, SprintId = sprintId, ParentTaskId = parentId, EstimateDays = r.EstimateDays,
         };
+        ApplyPlanningFields(task, r.Labels, r.StoryRef, r.ScreenRef, r.DesignUrl, r.PullRequestUrl);
         foreach (var e in assignees)
             task.Assignments.Add(new TaskAssignment { EmployeeId = e.Id, AssignedByUserId = task.AssignedByUserId });
         task.History.Add(new TaskHistory
@@ -196,9 +305,12 @@ public class TaskService(
             Details = assignees.Count > 0 ? $"Assigned to {string.Join(", ", assignees.Select(a => a.Name))}" : null
         });
         db.Tasks.Add(task);
-        await db.SaveChangesAsync(ct);
+        await SaveWithNumberAsync(task, ct);
 
-        audit.Log("Create", "Task", task.Id, newValues: new { r.Title, r.Priority, r.DueDate, departmentId, teamId, projectId, Assignees = r.AssigneeEmployeeIds });
+        audit.Log("Create", "Task", task.Id, newValues: new
+        {
+            r.Title, r.Type, r.Priority, r.DueDate, departmentId, teamId, projectId, task.Number, sprintId, parentId, Assignees = r.AssigneeEmployeeIds
+        });
         NotifyAssigned(task, assignees.Select(a => a.Id));
         await notifications.SaveAndDispatchAsync(ct);
         return await GetAsync(task.Id, ct);
@@ -211,17 +323,31 @@ public class TaskService(
         if (!string.IsNullOrEmpty(r.RowVersion) && task.RowVersion.ToString() != r.RowVersion)
             throw new ConflictException("The task was modified by someone else. Reload and try again.");
 
-        var assignees = await ValidateAssigneesAsync(r.AssigneeEmployeeIds, ct);
-        var old = new { task.Title, task.Priority, task.DueDate, task.StartDate, task.DepartmentId, task.TeamId, task.ProjectId, Assignees = task.Assignments.Select(a => a.EmployeeId).ToArray() };
+        var leadsTarget = r.ProjectId is int rp && await projectAccess.IsLeadAsync(rp, ct);
+        var assignees = await ValidateAssigneesAsync(r.AssigneeEmployeeIds, leadsTarget ? r.ProjectId : null, ct,
+            alreadyAssigned: task.Assignments.Select(a => a.EmployeeId).ToHashSet());
+        var old = new
+        {
+            task.Title, task.Type, task.Priority, task.DueDate, task.StartDate, task.DepartmentId, task.TeamId, task.ProjectId, task.SprintId,
+            task.ParentTaskId, task.EstimateDays, Assignees = task.Assignments.Select(a => a.EmployeeId).ToArray()
+        };
 
         task.Title = r.Title.Trim();
         task.Description = r.Description;
         task.Priority = r.Priority;
+        task.Type = r.Type;
         task.StartDate = r.StartDate;
         if (task.DueDate != r.DueDate) { task.DeadlineReminderSentAt = null; task.OverdueNotifiedAt = null; }
         task.DueDate = r.DueDate;
         (task.DepartmentId, task.TeamId) = await ResolveTargetAsync(r.DepartmentId, r.TeamId, assignees, ct);
         task.ProjectId = await ValidateProjectAsync(r.ProjectId, old.ProjectId, ct);
+        if (task.ProjectId != old.ProjectId && r.ParentTaskId is null && await db.Tasks.AnyAsync(t => t.ParentTaskId == id, ct))
+            throw new BadRequestException("Move the sub-tasks first: a task and its sub-tasks stay in the same project.");
+        task.ParentTaskId = await ValidateParentAsync(r.ParentTaskId, id, task.ProjectId, ct);
+        task.SprintId = await ValidateSprintAsync(r.SprintId, old.SprintId, ct);
+        task.EstimateDays = r.EstimateDays;
+        ApplyPlanningFields(task, r.Labels, r.StoryRef, r.ScreenRef, r.DesignUrl, r.PullRequestUrl);
+        if (task.ProjectId != old.ProjectId) task.Number = null; // a new number in the new project is given on save
 
         var desired = assignees.Select(a => a.Id).ToHashSet();
         var removed = task.Assignments.Where(a => !desired.Contains(a.EmployeeId)).ToList();
@@ -234,9 +360,13 @@ public class TaskService(
 
         var details = new List<string>();
         if (old.Title != task.Title) details.Add("title");
+        if (old.Type != task.Type) details.Add($"type → {task.Type}");
         if (old.Priority != task.Priority) details.Add($"priority → {task.Priority}");
         if (old.DueDate != task.DueDate) details.Add($"due date → {task.DueDate:yyyy-MM-dd HH:mm}");
         if (old.ProjectId != task.ProjectId) details.Add("project");
+        if (old.SprintId != task.SprintId) details.Add(task.SprintId is null ? "moved to backlog" : "sprint");
+        if (old.ParentTaskId != task.ParentTaskId) details.Add("parent task");
+        if (old.EstimateDays != task.EstimateDays) details.Add($"estimate → {task.EstimateDays?.ToString("0.#") ?? "none"}");
         if (added.Count > 0) details.Add($"added {added.Count} assignee(s)");
         if (removed.Count > 0) details.Add($"removed {removed.Count} assignee(s)");
         db.TaskHistory.Add(new TaskHistory
@@ -244,11 +374,16 @@ public class TaskService(
             TaskId = id, ChangedByUserId = currentUser.UserId, Action = "Updated",
             Details = details.Count > 0 ? "Changed " + string.Join(", ", details) : "Details updated"
         });
-        audit.Log("Update", "Task", id, old, new { r.Title, r.Priority, r.DueDate, r.StartDate, task.DepartmentId, task.TeamId, task.ProjectId, Assignees = r.AssigneeEmployeeIds });
+        audit.Log("Update", "Task", id, old, new
+        {
+            r.Title, r.Type, r.Priority, r.DueDate, r.StartDate, task.DepartmentId, task.TeamId, task.ProjectId, task.SprintId, task.ParentTaskId,
+            r.EstimateDays, Assignees = r.AssigneeEmployeeIds
+        });
         NotifyAssigned(task, added);
 
-        try { await notifications.SaveAndDispatchAsync(ct); }
+        try { await SaveWithNumberAsync(task, ct); }
         catch (DbUpdateConcurrencyException) { throw new ConflictException("The task was modified by someone else. Reload and try again."); }
+        await notifications.SaveAndDispatchAsync(ct);
         return await GetAsync(id, ct);
     }
 
@@ -286,6 +421,8 @@ public class TaskService(
                 if (from == TaskItemStatus.Completed) task.Rating = null; // reopened: the old rating no longer applies
                 break;
         }
+        // A finished task is no longer waiting for anything.
+        if (r.Status is TaskItemStatus.Completed or TaskItemStatus.Cancelled) ClearBlocked(task);
         // Approving / rejecting a submitted task is a review: keep it (with rating and notes) for the review report.
         if (r.Status is TaskItemStatus.Completed or TaskItemStatus.Rejected)
             db.TaskReviews.Add(new TaskReview
@@ -320,8 +457,111 @@ public class TaskService(
             task.StartDate ??= clock.UtcNow;
         }
         db.TaskHistory.Add(new TaskHistory { TaskId = id, ChangedByUserId = currentUser.UserId, Action = "ProgressUpdated", Details = $"{from}% → {r.ProgressPercent}%" + (string.IsNullOrWhiteSpace(r.Note) ? "" : $": {r.Note}") });
+        try { await db.SaveChangesAsync(ct); }
+        catch (DbUpdateConcurrencyException) { throw new ConflictException("The task was modified by someone else. Reload and try again."); }
+        return await GetAsync(id, ct);
+    }
+
+    public async Task<TaskDetailsDto> SetBlockedAsync(int id, SetTaskBlockedRequest r, CancellationToken ct = default)
+    {
+        var task = await LoadVisibleAsync(id, ct);
+        if (!await IsAssigneeAsync(task, ct) && !await IsReviewerAsync(task, ct)) throw new ForbiddenException("You cannot update this task.");
+        if (r.IsBlocked && task.IsClosed) throw new ConflictException("Closed tasks cannot be blocked.");
+        if (r.IsBlocked == task.IsBlocked && (!r.IsBlocked || r.Reason?.Trim() == task.BlockedReason)) return await GetAsync(id, ct);
+
+        if (r.IsBlocked)
+        {
+            task.IsBlocked = true;
+            task.BlockedReason = r.Reason!.Trim();
+            task.BlockedAt = clock.UtcNow;
+            db.TaskHistory.Add(new TaskHistory { TaskId = id, ChangedByUserId = currentUser.UserId, Action = "Blocked", Details = task.BlockedReason });
+            // Tell the people who can unblock it: the creator, the department head / team leader and the project leads.
+            var recipients = (await ParticipantsAsync(task, ct)).Where(p => p.Role is "Creator" or "Leader" or "ProjectLead")
+                .Select(p => p.UserId).Distinct().Where(u => u != currentUser.UserId);
+            foreach (var uid in recipients)
+                notifications.Add(uid, NotificationType.TaskBlocked, "Task blocked",
+                    $"\"{task.Title}\" is blocked: {task.BlockedReason}", "مهمة متوقفة",
+                    $"المهمة \"{task.Title}\" متوقفة: {task.BlockedReason}", $"/tasks/{id}", "Task", id);
+        }
+        else
+        {
+            ClearBlocked(task);
+            db.TaskHistory.Add(new TaskHistory { TaskId = id, ChangedByUserId = currentUser.UserId, Action = "Unblocked", Details = r.Reason });
+        }
+        audit.Log(r.IsBlocked ? "Block" : "Unblock", "Task", id, newValues: new { r.IsBlocked, r.Reason });
+        try { await notifications.SaveAndDispatchAsync(ct); }
+        catch (DbUpdateConcurrencyException) { throw new ConflictException("The task was modified by someone else. Reload and try again."); }
+        return await GetAsync(id, ct);
+    }
+
+    private static void ClearBlocked(TaskItem task)
+    {
+        task.IsBlocked = false;
+        task.BlockedReason = null;
+        task.BlockedAt = null;
+    }
+
+    public async Task<TaskDetailsDto> SetSprintAsync(int id, SetTaskSprintRequest r, CancellationToken ct = default)
+    {
+        var task = await LoadVisibleAsync(id, ct);
+        if (!await CanPlanAsync(task, ct)) throw new ForbiddenException("You cannot plan this task.");
+        if (task.SprintId == r.SprintId) return await GetAsync(id, ct);
+        var from = task.SprintId;
+        task.SprintId = await ValidateSprintAsync(r.SprintId, from, ct);
+        var name = r.SprintId is int s ? await db.Sprints.Where(x => x.Id == s).Select(x => x.Name).FirstAsync(ct) : null;
+        db.TaskHistory.Add(new TaskHistory
+        {
+            TaskId = id, ChangedByUserId = currentUser.UserId, Action = "SprintChanged",
+            Details = name is null ? "Moved to backlog" : $"Planned in {name}"
+        });
+        audit.Log("ChangeSprint", "Task", id, new { SprintId = from }, new { r.SprintId });
+        try { await db.SaveChangesAsync(ct); }
+        catch (DbUpdateConcurrencyException) { throw new ConflictException("The task was modified by someone else. Reload and try again."); }
+        return await GetAsync(id, ct);
+    }
+
+    public async Task<TaskDetailsDto> AddDependencyAsync(int id, AddDependencyRequest r, CancellationToken ct = default)
+    {
+        var task = await LoadVisibleAsync(id, ct);
+        if (!await IsReviewerAsync(task, ct)) throw new ForbiddenException("You cannot change this task's dependencies.");
+        if (r.BlockedByTaskId == id) throw new BadRequestException("A task cannot depend on itself.");
+        var blocker = await LoadVisibleAsync(r.BlockedByTaskId, ct, includeAssignments: false);
+        if (await db.TaskDependencies.AnyAsync(d => d.TaskId == id && d.BlockedByTaskId == blocker.Id, ct)) return await GetAsync(id, ct);
+        if (await DependsOnAsync(blocker.Id, id, ct))
+            throw new BadRequestException("That would create a circular dependency.");
+
+        db.TaskDependencies.Add(new TaskDependency { TaskId = id, BlockedByTaskId = blocker.Id });
+        db.TaskHistory.Add(new TaskHistory { TaskId = id, ChangedByUserId = currentUser.UserId, Action = "DependencyAdded", Details = $"Waits for \"{blocker.Title}\"" });
+        audit.Log("AddDependency", "Task", id, newValues: new { r.BlockedByTaskId });
         await db.SaveChangesAsync(ct);
         return await GetAsync(id, ct);
+    }
+
+    public async Task<TaskDetailsDto> RemoveDependencyAsync(int id, int blockedByTaskId, CancellationToken ct = default)
+    {
+        var task = await LoadVisibleAsync(id, ct);
+        if (!await IsReviewerAsync(task, ct)) throw new ForbiddenException("You cannot change this task's dependencies.");
+        var dep = await db.TaskDependencies.Include(d => d.BlockedByTask).FirstOrDefaultAsync(d => d.TaskId == id && d.BlockedByTaskId == blockedByTaskId, ct)
+                  ?? throw new NotFoundException("Dependency", blockedByTaskId);
+        db.TaskDependencies.Remove(dep);
+        db.TaskHistory.Add(new TaskHistory { TaskId = id, ChangedByUserId = currentUser.UserId, Action = "DependencyRemoved", Details = $"No longer waits for \"{dep.BlockedByTask.Title}\"" });
+        audit.Log("RemoveDependency", "Task", id, new { BlockedByTaskId = blockedByTaskId });
+        await db.SaveChangesAsync(ct);
+        return await GetAsync(id, ct);
+    }
+
+    /// <summary>True when <paramref name="taskId"/> (transitively) waits for <paramref name="target"/>.</summary>
+    private async Task<bool> DependsOnAsync(int taskId, int target, CancellationToken ct)
+    {
+        var seen = new HashSet<int> { taskId };
+        var frontier = new List<int> { taskId };
+        while (frontier.Count > 0)
+        {
+            var next = await db.TaskDependencies.AsNoTracking().Where(d => frontier.Contains(d.TaskId)).Select(d => d.BlockedByTaskId).ToListAsync(ct);
+            if (next.Contains(target)) return true;
+            frontier = next.Where(seen.Add).ToList();
+        }
+        return false;
     }
 
     public async Task DeleteAsync(int id, CancellationToken ct = default)
@@ -329,7 +569,7 @@ public class TaskService(
         var task = await LoadVisibleAsync(id, ct);
         if (!await IsReviewerAsync(task, ct)) throw new ForbiddenException("You cannot delete this task.");
         var files = await db.TaskAttachments.Where(a => a.TaskId == id).Select(a => a.StoredFileName).ToListAsync(ct);
-        db.Tasks.Remove(task); // cascades to assignments/comments/attachments/history
+        db.Tasks.Remove(task); // cascades to assignments/comments/attachments/history/dependencies; sub-tasks become top-level
         audit.Log("Delete", "Task", id, new { task.Title, Status = task.Status.ToString() });
         await db.SaveChangesAsync(ct);
         foreach (var f in files) storage.Delete(f);
@@ -383,8 +623,8 @@ public class TaskService(
     }
 
     /// <summary>
-    /// People involved in the task, with read receipts: assignees (with accounts), the creator, and the head of the task's
-    /// department / leader of its team. A person is listed once, with their most specific role.
+    /// People involved in the task, with read receipts: assignees (with accounts), the creator, the head of the task's
+    /// department / leader of its team, and the leads of its project. A person is listed once, with their most specific role.
     /// </summary>
     private async Task<List<TaskParticipantDto>> ParticipantsAsync(TaskItem task, CancellationToken ct)
     {
@@ -394,15 +634,18 @@ public class TaskService(
             leaderEmployeeIds.Add(head);
         if (task.TeamId is int t && await db.Teams.Where(x => x.Id == t).Select(x => x.LeaderEmployeeId).FirstOrDefaultAsync(ct) is int lead)
             leaderEmployeeIds.Add(lead);
+        var projectLeadIds = task.ProjectId is int p
+            ? await db.ProjectMembers.Where(m => m.ProjectId == p && m.Role != ProjectRole.Member).Select(m => m.EmployeeId).Distinct().ToListAsync(ct)
+            : [];
 
-        var employeeIds = assigneeIds.Concat(leaderEmployeeIds).Distinct().ToList();
+        var employeeIds = assigneeIds.Concat(leaderEmployeeIds).Concat(projectLeadIds).Distinct().ToList();
         var employees = await db.Employees.AsNoTracking().Where(e => employeeIds.Contains(e.Id) && e.UserId != null && !e.IsDeleted)
             .Select(e => new { e.Id, UserId = e.UserId!.Value, Name = e.FirstName + " " + e.LastName }).ToListAsync(ct);
 
         var list = new List<(int UserId, string Name, int? EmployeeId, string Role)>();
         void Add(int userId, string name, int? employeeId, string role)
         {
-            if (list.All(p => p.UserId != userId)) list.Add((userId, name, employeeId, role));
+            if (list.All(x => x.UserId != userId)) list.Add((userId, name, employeeId, role));
         }
         foreach (var id in assigneeIds)
             if (employees.FirstOrDefault(e => e.Id == id) is { } e) Add(e.UserId, e.Name, e.Id, "Assignee");
@@ -411,12 +654,14 @@ public class TaskService(
         Add(creator.Id, creator.FullName, creatorEmployee, "Creator");
         foreach (var id in leaderEmployeeIds)
             if (employees.FirstOrDefault(e => e.Id == id) is { } e) Add(e.UserId, e.Name, e.Id, "Leader");
+        foreach (var id in projectLeadIds)
+            if (employees.FirstOrDefault(e => e.Id == id) is { } e) Add(e.UserId, e.Name, e.Id, "ProjectLead");
 
-        var userIds = list.Select(p => p.UserId).ToList();
+        var userIds = list.Select(x => x.UserId).ToList();
         var views = await db.TaskViews.AsNoTracking().Where(v => v.TaskId == task.Id && userIds.Contains(v.UserId))
             .ToDictionaryAsync(v => v.UserId, ct);
-        return list.Select(p => new TaskParticipantDto(p.UserId, p.Name, p.EmployeeId, p.Role,
-            views.GetValueOrDefault(p.UserId)?.FirstSeenAt, views.GetValueOrDefault(p.UserId)?.LastSeenAt)).ToList();
+        return list.Select(x => new TaskParticipantDto(x.UserId, x.Name, x.EmployeeId, x.Role,
+            views.GetValueOrDefault(x.UserId)?.FirstSeenAt, views.GetValueOrDefault(x.UserId)?.LastSeenAt)).ToList();
     }
 
     public async Task<IReadOnlyList<TaskHistoryDto>> GetHistoryAsync(int id, CancellationToken ct = default)
@@ -429,7 +674,7 @@ public class TaskService(
 
     public async Task<TaskAttachmentDto> AddAttachmentAsync(int id, string fileName, string contentType, long size, Stream content, CancellationToken ct = default)
     {
-        var task = await LoadVisibleAsync(id, ct);
+        await LoadVisibleAsync(id, ct);
         var ext = Path.GetExtension(fileName).ToLowerInvariant();
         if (!AllowedExtensions.Contains(ext)) throw new BadRequestException($"File type '{ext}' is not allowed.");
         if (size <= 0 || size > MaxAttachmentBytes) throw new BadRequestException("Files must be between 1 byte and 10 MB.");
@@ -477,12 +722,15 @@ public class TaskService(
         var counts = await query.GroupBy(t => t.Status).Select(g => new { g.Key, Count = g.Count() }).ToListAsync(ct);
         var overdue = await query.CountAsync(t => t.Status != TaskItemStatus.Completed && t.Status != TaskItemStatus.Cancelled && t.DueDate != null && t.DueDate < now, ct);
         var dueWeek = await query.CountAsync(t => t.Status != TaskItemStatus.Completed && t.Status != TaskItemStatus.Cancelled && t.DueDate >= now && t.DueDate <= weekEnd, ct);
-        var byPriority = await query.Where(t => t.Status != TaskItemStatus.Completed && t.Status != TaskItemStatus.Cancelled)
-            .GroupBy(t => t.Priority).Select(g => new { g.Key, Count = g.Count() }).ToListAsync(ct);
+        var open = query.Where(t => t.Status != TaskItemStatus.Completed && t.Status != TaskItemStatus.Cancelled);
+        var byPriority = await open.GroupBy(t => t.Priority).Select(g => new { g.Key, Count = g.Count() }).ToListAsync(ct);
+        var byType = await open.GroupBy(t => t.Type).Select(g => new { g.Key, Count = g.Count() }).ToListAsync(ct);
+        var blocked = await open.CountAsync(t => t.IsBlocked, ct);
         int C(TaskItemStatus s) => counts.FirstOrDefault(c => c.Key == s)?.Count ?? 0;
         return new TaskDashboardDto(counts.Sum(c => c.Count), C(TaskItemStatus.New), C(TaskItemStatus.Assigned), C(TaskItemStatus.InProgress),
             C(TaskItemStatus.PendingReview), C(TaskItemStatus.Completed), C(TaskItemStatus.Rejected), C(TaskItemStatus.Cancelled), overdue, dueWeek,
-            Enum.GetValues<TaskPriority>().ToDictionary(p => p.ToString(), p => byPriority.FirstOrDefault(b => b.Key == p)?.Count ?? 0));
+            Enum.GetValues<TaskPriority>().ToDictionary(p => p.ToString(), p => byPriority.FirstOrDefault(b => b.Key == p)?.Count ?? 0),
+            blocked, Enum.GetValues<TaskType>().ToDictionary(t => t.ToString(), t => byType.FirstOrDefault(b => b.Key == t)?.Count ?? 0));
     }
 
     public async Task<IReadOnlyDictionary<int, ProjectTaskStats>> GetProjectStatsAsync(int? projectId, CancellationToken ct = default)
@@ -504,17 +752,56 @@ public class TaskService(
     public async Task<int[]?> AccessibleProjectIdsAsync(CancellationToken ct = default)
     {
         if (currentUser.HasPermission(Permissions.TasksViewAll) || currentUser.HasPermission(Permissions.ProjectsManage)) return null;
-        return await (await VisibleTasksAsync(ct)).Where(t => t.ProjectId != null).Select(t => t.ProjectId!.Value).Distinct().ToArrayAsync(ct);
+        var fromTasks = await (await VisibleTasksAsync(ct)).Where(t => t.ProjectId != null).Select(t => t.ProjectId!.Value).Distinct().ToArrayAsync(ct);
+        var uid = currentUser.UserId ?? -1;
+        var created = await db.Projects.Where(p => p.CreatedByUserId == uid).Select(p => p.Id).ToArrayAsync(ct);
+        return fromTasks.Concat(created).Concat(await projectAccess.MemberProjectIdsAsync(ct)).Distinct().ToArray();
     }
 
     public async Task<(IReadOnlyList<TaskDto> Tasks, int[] OpenableIds)> GetProjectTasksAsync(int projectId, CancellationToken ct = default)
     {
-        var tasks = await db.Tasks.AsNoTracking().Where(t => t.ProjectId == projectId).Select(Projection(clock.UtcNow)).Take(5_000).ToListAsync(ct);
+        var tasks = await db.Tasks.AsNoTracking().Where(t => t.ProjectId == projectId).OrderBy(t => t.Id).Select(Projection(clock.UtcNow)).Take(5_000).ToListAsync(ct);
         var openable = await (await VisibleTasksAsync(ct)).Where(t => t.ProjectId == projectId).Select(t => t.Id).ToArrayAsync(ct);
         return (tasks, openable);
     }
 
+    public async Task<IReadOnlyList<TaskDto>> GetSprintTasksAsync(int sprintId, CancellationToken ct = default) =>
+        await (await VisibleTasksAsync(ct)).AsNoTracking().Where(t => t.SprintId == sprintId).OrderBy(t => t.Id)
+            .Select(Projection(clock.UtcNow)).Take(5_000).ToListAsync(ct);
+
     // ------------------------------------------------------------------ helpers
+
+    /// <summary>Saves; a task in a project without a number gets the next one. Retries if two tasks took the same number at once.</summary>
+    private async Task SaveWithNumberAsync(TaskItem task, CancellationToken ct)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            if (task.ProjectId is int pid && task.Number is null)
+                task.Number = (await db.Tasks.Where(t => t.ProjectId == pid && t.Id != task.Id).MaxAsync(t => t.Number, ct) ?? 0) + 1;
+            try
+            {
+                await db.SaveChangesAsync(ct);
+                return;
+            }
+            catch (DbUpdateException ex) when (ex is not DbUpdateConcurrencyException && task.ProjectId is not null && attempt < 3)
+            {
+                task.Number = null; // somebody else took that number: pick the next one
+            }
+        }
+    }
+
+    private static string NormalizeLabel(string label) => label.Trim().ToLowerInvariant();
+
+    private static string? Clean(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+
+    private static void ApplyPlanningFields(TaskItem task, string[]? labels, string? story, string? screen, string? design, string? pr)
+    {
+        task.Labels = (labels ?? []).Where(l => !string.IsNullOrWhiteSpace(l)).Select(NormalizeLabel).Distinct().ToArray();
+        task.StoryRef = Clean(story)?.ToUpperInvariant();
+        task.ScreenRef = Clean(screen)?.ToUpperInvariant();
+        task.DesignUrl = Clean(design);
+        task.PullRequestUrl = Clean(pr);
+    }
 
     /// <summary>New links only to open projects; a task may keep the (now closed) project it already had.</summary>
     private async Task<int?> ValidateProjectAsync(int? projectId, int? currentProjectId, CancellationToken ct)
@@ -527,21 +814,53 @@ public class TaskService(
         return id;
     }
 
+    /// <summary>One level of sub-tasks, inside the same project, and the parent must be visible.</summary>
+    private async Task<int?> ValidateParentAsync(int? parentId, int? taskId, int? projectId, CancellationToken ct)
+    {
+        if (parentId is not int pid) return null;
+        if (pid == taskId) throw new BadRequestException("A task cannot be its own parent.");
+        var parent = await (await VisibleTasksAsync(ct)).AsNoTracking().Where(t => t.Id == pid)
+                         .Select(t => new { t.ProjectId, t.ParentTaskId }).FirstOrDefaultAsync(ct)
+                     ?? throw new NotFoundException("Task", pid);
+        if (parent.ParentTaskId is not null) throw new BadRequestException("Sub-tasks cannot have their own sub-tasks.");
+        if (parent.ProjectId != projectId) throw new BadRequestException("A sub-task must be in the same project as its parent.");
+        if (taskId is int id && await db.Tasks.AnyAsync(t => t.ParentTaskId == id, ct))
+            throw new BadRequestException("A task that has sub-tasks cannot become a sub-task.");
+        return pid;
+    }
+
+    /// <summary>Tasks can be planned into planned or active sprints; one already in a completed sprint may stay there.</summary>
+    private async Task<int?> ValidateSprintAsync(int? sprintId, int? currentSprintId, CancellationToken ct)
+    {
+        if (sprintId is not int id) return null;
+        var status = await db.Sprints.Where(s => s.Id == id).Select(s => (SprintStatus?)s.Status).FirstOrDefaultAsync(ct)
+                     ?? throw new NotFoundException("Sprint", id);
+        if (id != currentSprintId && status == SprintStatus.Completed)
+            throw new BadRequestException("Tasks cannot be added to a completed sprint.");
+        return id;
+    }
 
     private record AssigneeInfo(int Id, string Name, int DepartmentId, int? UserId);
 
-    private async Task<List<AssigneeInfo>> ValidateAssigneesAsync(int[] ids, CancellationToken ct)
+    /// <param name="leadProjectId">A project the user leads: its members may be assigned too.</param>
+    /// <param name="alreadyAssigned">People already on the task stay allowed (editing must not fail because of them).</param>
+    private async Task<List<AssigneeInfo>> ValidateAssigneesAsync(int[] ids, int? leadProjectId, CancellationToken ct,
+        IReadOnlySet<int>? alreadyAssigned = null)
     {
         var distinct = ids.Distinct().ToArray();
         if (distinct.Length == 0) return [];
-        var scoped = await scope.TaskScopedEmployeesAsync(ct);
         var found = await db.Employees.Where(e => distinct.Contains(e.Id) && !e.IsDeleted && e.IsActive)
             .Select(e => new AssigneeInfo(e.Id, e.FirstName + " " + e.LastName, e.DepartmentId, e.UserId)).ToListAsync(ct);
         if (found.Count != distinct.Length) throw new BadRequestException("One or more assignees do not exist or are inactive.");
         if (!currentUser.HasPermission(Permissions.TasksViewAll))
         {
-            var allowed = await scoped.CountAsync(e => distinct.Contains(e.Id), ct);
-            if (allowed != distinct.Length) throw new ForbiddenException("You can only assign tasks to members of the departments you head or the teams you lead.");
+            var scoped = await scope.TaskScopedEmployeesAsync(ct);
+            var allowed = (await scoped.Where(e => distinct.Contains(e.Id)).Select(e => e.Id).ToListAsync(ct)).ToHashSet();
+            if (leadProjectId is int p)
+                allowed.UnionWith(await db.ProjectMembers.Where(m => m.ProjectId == p && distinct.Contains(m.EmployeeId)).Select(m => m.EmployeeId).ToListAsync(ct));
+            if (alreadyAssigned is not null) allowed.UnionWith(alreadyAssigned);
+            if (distinct.Any(id => !allowed.Contains(id)))
+                throw new ForbiddenException("You can only assign tasks to members of the departments you head, the teams you lead or the projects you lead.");
         }
         // Preserve requested order (first = primary assignee).
         return distinct.Select(id => found.First(f => f.Id == id)).ToList();
@@ -560,9 +879,10 @@ public class TaskService(
         return (departments, teams);
     }
 
-    public async Task<TaskTargetsDto> GetTargetsAsync(CancellationToken ct = default)
+    public async Task<TaskTargetsDto> GetTargetsAsync(int? projectId = null, CancellationToken ct = default)
     {
-        if (!currentUser.HasPermission(Permissions.TasksAssign)) throw new ForbiddenException("You cannot assign tasks.");
+        var leads = await projectAccess.LeadProjectIdsAsync(ct);
+        if (!currentUser.HasPermission(Permissions.TasksAssign) && leads.Length == 0) throw new ForbiddenException("You cannot assign tasks.");
         var (deptIds, teamIds) = await AllowedTargetsAsync(ct);
 
         var departments = db.Departments.Where(d => d.IsActive);
@@ -570,11 +890,18 @@ public class TaskService(
         var teams = db.Teams.Where(t => t.IsActive);
         if (teamIds is not null) teams = teams.Where(t => teamIds.Contains(t.Id));
 
+        var employees = (await scope.TaskScopedEmployeesAsync(ct)).Where(e => e.IsActive);
+        if (projectId is int p && leads.Contains(p) && !currentUser.HasPermission(Permissions.TasksViewAll))
+        {
+            var members = db.ProjectMembers.Where(m => m.ProjectId == p).Select(m => m.EmployeeId);
+            var scopedIds = employees.Select(e => e.Id);
+            employees = db.Employees.Where(e => !e.IsDeleted && e.IsActive && (scopedIds.Contains(e.Id) || members.Contains(e.Id)));
+        }
+
         return new TaskTargetsDto(
             await departments.OrderBy(d => d.Name).Select(d => new TaskTargetDepartmentDto(d.Id, d.Name, d.NameAr, d.ManagerEmployeeId)).ToListAsync(ct),
             await teams.OrderBy(t => t.Name).Select(t => new TaskTargetTeamDto(t.Id, t.Name, t.NameAr, t.DepartmentId, t.LeaderEmployeeId)).ToListAsync(ct),
-            await (await scope.TaskScopedEmployeesAsync(ct)).Where(e => e.IsActive)
-                .OrderBy(e => e.FirstName).ThenBy(e => e.LastName)
+            await employees.OrderBy(e => e.FirstName).ThenBy(e => e.LastName)
                 .Select(e => new TaskTargetEmployeeDto(e.Id, e.FirstName + " " + e.LastName, e.EmployeeCode, e.DepartmentId,
                     e.TeamMemberships.Select(m => m.TeamId).ToArray()))
                 .ToListAsync(ct));

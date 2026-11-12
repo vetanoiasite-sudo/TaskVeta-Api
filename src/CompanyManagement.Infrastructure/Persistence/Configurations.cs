@@ -219,6 +219,7 @@ public class TaskItemConfiguration : IEntityTypeConfiguration<TaskItem>
         {
             t.HasCheckConstraint("CK_Tasks_Progress", "\"ProgressPercent\" BETWEEN 0 AND 100");
             t.HasCheckConstraint("CK_Tasks_Rating", "\"Rating\" IS NULL OR \"Rating\" BETWEEN 1 AND 10");
+            t.HasCheckConstraint("CK_Tasks_Estimate", "\"EstimateDays\" IS NULL OR (\"EstimateDays\" > 0 AND \"EstimateDays\" <= 30)");
         });
         b.Ignore(t => t.IsClosed);
         b.Property(t => t.Title).HasMaxLength(200).IsRequired();
@@ -236,6 +237,32 @@ public class TaskItemConfiguration : IEntityTypeConfiguration<TaskItem>
         b.HasOne(t => t.Team).WithMany().HasForeignKey(t => t.TeamId).OnDelete(DeleteBehavior.SetNull);
         b.HasIndex(t => t.ProjectId);
         b.HasOne(t => t.Project).WithMany(p => p.Tasks).HasForeignKey(t => t.ProjectId).OnDelete(DeleteBehavior.SetNull);
+
+        // Task key = project code + Number (GA-123): unique inside a project.
+        b.HasIndex(t => new { t.ProjectId, t.Number }).IsUnique().HasFilter("\"Number\" IS NOT NULL");
+        b.HasIndex(t => t.Type);
+        b.HasIndex(t => t.SprintId);
+        b.HasOne(t => t.Sprint).WithMany(s => s.Tasks).HasForeignKey(t => t.SprintId).OnDelete(DeleteBehavior.SetNull);
+        b.HasIndex(t => t.ParentTaskId);
+        b.HasOne(t => t.ParentTask).WithMany(t => t.Subtasks).HasForeignKey(t => t.ParentTaskId).OnDelete(DeleteBehavior.SetNull);
+        b.Property(t => t.EstimateDays).HasPrecision(4, 1);
+        b.Property(t => t.StoryRef).HasMaxLength(50);
+        b.Property(t => t.ScreenRef).HasMaxLength(50);
+        b.Property(t => t.DesignUrl).HasMaxLength(500);
+        b.Property(t => t.PullRequestUrl).HasMaxLength(500);
+        b.Property(t => t.BlockedReason).HasMaxLength(500);
+    }
+}
+
+public class TaskDependencyConfiguration : IEntityTypeConfiguration<TaskDependency>
+{
+    public void Configure(EntityTypeBuilder<TaskDependency> b)
+    {
+        b.ToTable("TaskDependencies", t => t.HasCheckConstraint("CK_TaskDependencies_NotSelf", "\"TaskId\" <> \"BlockedByTaskId\""));
+        b.HasIndex(d => new { d.TaskId, d.BlockedByTaskId }).IsUnique();
+        b.HasIndex(d => d.BlockedByTaskId);
+        b.HasOne(d => d.Task).WithMany(t => t.BlockedBy).HasForeignKey(d => d.TaskId).OnDelete(DeleteBehavior.Cascade);
+        b.HasOne(d => d.BlockedByTask).WithMany(t => t.Blocks).HasForeignKey(d => d.BlockedByTaskId).OnDelete(DeleteBehavior.Cascade);
     }
 }
 
@@ -248,8 +275,38 @@ public class ProjectConfiguration : IEntityTypeConfiguration<Project>
         b.Property(p => p.NameAr).HasMaxLength(150);
         b.Property(p => p.Code).HasMaxLength(20).IsRequired();
         b.Property(p => p.Description).HasMaxLength(2000);
+        b.Property(p => p.ClientName).HasMaxLength(150);
+        b.Property(p => p.RepositoryUrl).HasMaxLength(500);
+        b.Property(p => p.DesignUrl).HasMaxLength(500);
+        b.Property(p => p.DocsUrl).HasMaxLength(500);
         b.HasIndex(p => p.Code).IsUnique();
         b.HasIndex(p => p.Name);
+        b.HasOne(p => p.CreatedBy).WithMany().HasForeignKey(p => p.CreatedByUserId).OnDelete(DeleteBehavior.SetNull);
+    }
+}
+
+public class ProjectMemberConfiguration : IEntityTypeConfiguration<ProjectMember>
+{
+    public void Configure(EntityTypeBuilder<ProjectMember> b)
+    {
+        b.ToTable("ProjectMembers");
+        b.HasIndex(m => new { m.ProjectId, m.EmployeeId, m.Role }).IsUnique();
+        b.HasIndex(m => m.EmployeeId);
+        b.HasOne(m => m.Project).WithMany(p => p.Members).HasForeignKey(m => m.ProjectId).OnDelete(DeleteBehavior.Cascade);
+        b.HasOne(m => m.Employee).WithMany().HasForeignKey(m => m.EmployeeId).OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+public class SprintConfiguration : IEntityTypeConfiguration<Sprint>
+{
+    public void Configure(EntityTypeBuilder<Sprint> b)
+    {
+        b.ToTable("Sprints", t => t.HasCheckConstraint("CK_Sprints_Dates", "\"EndDate\" >= \"StartDate\""));
+        b.Property(s => s.Name).HasMaxLength(100).IsRequired();
+        b.Property(s => s.Goal).HasMaxLength(1000);
+        b.HasIndex(s => s.StartDate);
+        // At most one active sprint at a time (Status 2 = Active).
+        b.HasIndex(s => s.Status, "IX_Sprints_SingleActive").IsUnique().HasFilter("\"Status\" = 2");
     }
 }
 

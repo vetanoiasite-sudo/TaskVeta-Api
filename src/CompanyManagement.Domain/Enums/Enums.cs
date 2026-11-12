@@ -37,6 +37,37 @@ public enum VerificationPolicy
     All = 2
 }
 
+/// <summary>Kind of work (Way of Working §3.1). Drives the sprint capacity split: features / improvements + tech-debt / bugs.</summary>
+public enum TaskType
+{
+    Feature = 1,
+    Improvement = 2,
+    Bug = 3,
+    TechDebt = 4,
+    Design = 5,
+    Docs = 6
+}
+
+/// <summary>A person's role inside one project. A person may hold several roles in the same project.</summary>
+public enum ProjectRole
+{
+    BrOwner = 1,
+    UiUxOwner = 2,
+    FrontendLead = 3,
+    BackendLead = 4,
+    MobileLead = 5,
+    QaOwner = 6,
+    Member = 7
+}
+
+public enum SprintStatus
+{
+    Planned = 1,
+    Active = 2,
+    Completed = 3
+}
+
+/// <summary>Shown in the UI as P3 (Low) … P0 (Urgent).</summary>
 public enum TaskPriority
 {
     Low = 1,
@@ -95,5 +126,7 @@ public enum NotificationType
     AttendanceAttention = 9,
     LeaveRequest = 10,
     System = 11,
-    TaskMention = 12
+    TaskMention = 12,
+    TaskBlocked = 13,
+    ProjectMembership = 14
 }

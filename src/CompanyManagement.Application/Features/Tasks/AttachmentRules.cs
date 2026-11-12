@@ -30,6 +30,7 @@ public static class AttachmentRules
         [".pptx"] = new(AttachmentKind.Document, "application/vnd.openxmlformats-officedocument.presentationml.presentation"),
         [".txt"] = new(AttachmentKind.Document, "text/plain"),
         [".csv"] = new(AttachmentKind.Document, "text/csv"),
+        [".md"] = new(AttachmentKind.Document, "text/markdown"),
         [".zip"] = new(AttachmentKind.Document, "application/zip"),
 
         [".png"] = new(AttachmentKind.Image, "image/png"),

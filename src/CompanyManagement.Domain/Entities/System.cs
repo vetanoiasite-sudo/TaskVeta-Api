@@ -20,7 +20,7 @@ public class Notification : BaseEntity
     public DateTime? ReadAt { get; set; }
 }
 
-public class AuditLog
+public class AuditLog : ISourceTracked
 {
     public long Id { get; set; }
     public int? UserId { get; set; }
@@ -32,5 +32,7 @@ public class AuditLog
     public string? NewValues { get; set; }
     public string? Reason { get; set; }
     public string? IpAddress { get; set; }
+    /// <summary>Null for the TaskVeta app, "Claude" when the action was made through the MCP endpoint.</summary>
+    public string? Source { get; set; }
     public DateTime CreatedAt { get; set; }
 }

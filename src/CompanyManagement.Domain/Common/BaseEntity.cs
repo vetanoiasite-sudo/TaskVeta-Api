@@ -19,3 +19,9 @@ public class DomainException : Exception
     public string Code { get; }
     public DomainException(string message, string code = "domain_error") : base(message) => Code = code;
 }
+
+/// <summary>Records where a row came from: null for the TaskVeta app, "Claude" for the MCP endpoint. Stamped on insert.</summary>
+public interface ISourceTracked
+{
+    string? Source { get; set; }
+}

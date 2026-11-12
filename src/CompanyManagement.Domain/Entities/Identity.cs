@@ -40,3 +40,25 @@ public class RefreshToken : BaseEntity
 
     public bool IsActive(DateTime utcNow) => RevokedAt is null && ExpiresAt > utcNow;
 }
+
+/// <summary>
+/// A personal key that lets Claude (Claude Code / Claude Desktop, through the MCP endpoint) act as this user.
+/// Only valid on <c>/mcp</c>. The raw key is shown once; only its SHA-256 hash is stored.
+/// </summary>
+public class PersonalAccessToken : BaseEntity
+{
+    public const string KeyPrefix = "tvk_";
+
+    public int UserId { get; set; }
+    public ApplicationUser User { get; set; } = null!;
+    /// <summary>What the key is for, e.g. "Laptop – Claude Code".</summary>
+    public string Name { get; set; } = string.Empty;
+    public string TokenHash { get; set; } = string.Empty;
+    /// <summary>First characters of the key, to recognise it in the list (e.g. "tvk_3fA9").</summary>
+    public string Hint { get; set; } = string.Empty;
+    public DateTime? ExpiresAt { get; set; }
+    public DateTime? LastUsedAt { get; set; }
+    public DateTime? RevokedAt { get; set; }
+
+    public bool IsActive(DateTime utcNow) => RevokedAt is null && (ExpiresAt is null || ExpiresAt > utcNow);
+}

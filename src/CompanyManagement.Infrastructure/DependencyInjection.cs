@@ -22,12 +22,13 @@ public static class DependencyInjection
         services.AddMemoryCache();
         services.AddHttpContextAccessor();
 
-        services.AddDbContext<AppDbContext>(o => o.UseNpgsql(connectionString, npg =>
+        services.AddScoped<SourceStampInterceptor>();
+        services.AddDbContext<AppDbContext>((sp, o) => o.UseNpgsql(connectionString, npg =>
         {
             npg.MigrationsAssembly(typeof(AppDbContext).Assembly.FullName);
             npg.UseQuerySplittingBehavior(QuerySplittingBehavior.SingleQuery);
             npg.EnableRetryOnFailure(maxRetryCount: 3);
-        }));
+        }).AddInterceptors(sp.GetRequiredService<SourceStampInterceptor>()));
         services.AddScoped<IApplicationDbContext>(sp => sp.GetRequiredService<AppDbContext>());
 
         services.AddIdentityCore<ApplicationUser>(o =>
@@ -56,6 +57,7 @@ public static class DependencyInjection
         services.AddSingleton<ITokenService, TokenService>();
         services.AddSingleton<IFileStorage, LocalFileStorage>();
         services.AddSingleton<IExportService, ExportService>();
+        services.AddSingleton<IDocumentTextExtractor, DocumentTextExtractor>();
         services.AddSingleton<IAttendanceVerifier, AttendanceVerifier>();
         services.AddScoped<DatabaseSeeder>();
 

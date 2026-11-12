@@ -18,6 +18,8 @@ public static class AppClaims
 {
     public const string EmployeeId = "employee_id";
     public const string Permission = "permission";
+    /// <summary>Set to "Claude" on requests authenticated with a personal key (the MCP endpoint).</summary>
+    public const string Via = "via";
 }
 
 public class CurrentUser(IHttpContextAccessor accessor) : ICurrentUser
@@ -31,6 +33,7 @@ public class CurrentUser(IHttpContextAccessor accessor) : ICurrentUser
     public IReadOnlyCollection<string> Roles => Principal?.FindAll(ClaimTypes.Role).Select(c => c.Value).ToArray() ?? [];
     public bool IsInRole(string role) => Principal?.IsInRole(role) == true;
     public bool HasPermission(string permission) => Permissions.ForRoles(Roles).Contains(permission);
+    public string? Via => Principal?.FindFirstValue(AppClaims.Via);
 }
 
 public class CompanyClock(TimeProvider time, IServiceProvider services, IMemoryCache cache) : ICompanyClock

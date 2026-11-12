@@ -104,8 +104,10 @@ public class TaskAssignment : BaseEntity
     public int AssignedByUserId { get; set; }
 }
 
-public class TaskComment : BaseEntity
+public class TaskComment : BaseEntity, ISourceTracked
 {
+    /// <summary>"Claude" when written through the MCP endpoint.</summary>
+    public string? Source { get; set; }
     public int TaskId { get; set; }
     public TaskItem Task { get; set; } = null!;
     public int UserId { get; set; }
@@ -174,7 +176,7 @@ public class TaskAttachment : BaseEntity
     public int? DurationSeconds { get; set; }
 }
 
-public class TaskHistory : BaseEntity
+public class TaskHistory : BaseEntity, ISourceTracked
 {
     public int TaskId { get; set; }
     public TaskItem Task { get; set; } = null!;
@@ -184,6 +186,8 @@ public class TaskHistory : BaseEntity
     public TaskItemStatus? FromStatus { get; set; }
     public TaskItemStatus? ToStatus { get; set; }
     public string? Details { get; set; }
+    /// <summary>Where the change came from: null for the TaskVeta app, "Claude" when made through the MCP endpoint.</summary>
+    public string? Source { get; set; }
 }
 
 /// <summary>Allowed task status transitions.</summary>

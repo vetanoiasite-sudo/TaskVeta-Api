@@ -19,7 +19,7 @@ public record TaskDto(int Id, string Key, string Title, TaskType Type, TaskPrior
 public record TaskRefDto(int Id, string Key, string Title, TaskType Type, TaskItemStatus Status);
 
 public record TaskCommentDto(int Id, int UserId, string UserName, string Content, DateTime CreatedAt, int[] MentionedUserIds,
-    IReadOnlyList<TaskAttachmentDto> Attachments, IReadOnlyList<TaskReactionDto> Reactions);
+    IReadOnlyList<TaskAttachmentDto> Attachments, IReadOnlyList<TaskReactionDto> Reactions, string? Source = null);
 
 public record TaskReactionUserDto(int UserId, string Name);
 /// <summary>One emoji on a comment with who used it.</summary>
@@ -37,7 +37,7 @@ public record TaskAttachmentDto(int Id, string FileName, string ContentType, lon
     DateTime CreatedAt, AttachmentKind Kind, int? CommentId, int? DurationSeconds);
 
 public record TaskHistoryDto(int Id, string Action, TaskItemStatus? FromStatus, TaskItemStatus? ToStatus, string? Details,
-    string? ChangedBy, DateTime CreatedAt);
+    string? ChangedBy, DateTime CreatedAt, string? Source = null);
 
 public record TaskReviewDto(int Id, bool Approved, int? Rating, string? Notes, int ReviewerUserId, string ReviewerName, DateTime CreatedAt);
 
@@ -104,6 +104,15 @@ public record UpdateTaskProgressRequest(int ProgressPercent, string? Note);
 public record AddCommentRequest(string? Content, int[]? MentionedUserIds = null, int[]? AttachmentIds = null);
 /// <summary>Flag or clear Blocked. A reason is required when blocking.</summary>
 public record SetTaskBlockedRequest(bool IsBlocked, string? Reason);
+/// <summary>The pull request that implements the task, or null to remove the link.</summary>
+public record SetPullRequestRequest(string? Url);
+
+public class SetPullRequestRequestValidator : AbstractValidator<SetPullRequestRequest>
+{
+    public SetPullRequestRequestValidator() =>
+        RuleFor(x => x.Url).Must(u => string.IsNullOrWhiteSpace(u) || (u.Length <= 500 && TaskRules.IsHttpUrl(u.Trim())))
+            .WithMessage("Pull request link must be a valid http(s) URL.");
+}
 /// <summary>Move a task to a sprint (or to the backlog with null).</summary>
 public record SetTaskSprintRequest(int? SprintId);
 public record AddDependencyRequest(int BlockedByTaskId);

@@ -19,6 +19,8 @@ public interface ITaskService
     Task<TaskDetailsDto> ChangeStatusAsync(int id, UpdateTaskStatusRequest request, CancellationToken ct = default);
     Task<TaskDetailsDto> UpdateProgressAsync(int id, UpdateTaskProgressRequest request, CancellationToken ct = default);
     Task<TaskDetailsDto> SetBlockedAsync(int id, SetTaskBlockedRequest request, CancellationToken ct = default);
+    /// <summary>Link (or clear) the pull request. Assignees and reviewers.</summary>
+    Task<TaskDetailsDto> SetPullRequestAsync(int id, SetPullRequestRequest request, CancellationToken ct = default);
     Task<TaskDetailsDto> SetSprintAsync(int id, SetTaskSprintRequest request, CancellationToken ct = default);
     Task<TaskDetailsDto> AddDependencyAsync(int id, AddDependencyRequest request, CancellationToken ct = default);
     Task<TaskDetailsDto> RemoveDependencyAsync(int id, int blockedByTaskId, CancellationToken ct = default);
@@ -254,9 +256,9 @@ public class TaskService(
         var byComment = attachments.Where(a => a.CommentId != null).ToLookup(a => a.CommentId!.Value);
         var reactions = await ReactionsAsync(db.TaskCommentReactions.Where(r => r.Comment.TaskId == id), ct);
         var comments = (await db.TaskComments.AsNoTracking().Where(c => c.TaskId == id).OrderBy(c => c.CreatedAt)
-                .Select(c => new { c.Id, c.UserId, UserName = c.User.FullName, c.Content, c.CreatedAt, c.MentionedUserIds }).ToListAsync(ct))
+                .Select(c => new { c.Id, c.UserId, UserName = c.User.FullName, c.Content, c.CreatedAt, c.MentionedUserIds, c.Source }).ToListAsync(ct))
             .Select(c => new TaskCommentDto(c.Id, c.UserId, c.UserName, c.Content, c.CreatedAt, c.MentionedUserIds, byComment[c.Id].ToList(),
-                reactions.GetValueOrDefault(c.Id) ?? []))
+                reactions.GetValueOrDefault(c.Id) ?? [], c.Source))
             .ToList();
 
         var parent = task.ParentTaskId is int pid
@@ -472,6 +474,23 @@ public class TaskService(
         return await GetAsync(id, ct);
     }
 
+    public async Task<TaskDetailsDto> SetPullRequestAsync(int id, SetPullRequestRequest r, CancellationToken ct = default)
+    {
+        var task = await LoadVisibleAsync(id, ct);
+        if (!await IsAssigneeAsync(task, ct) && !await IsReviewerAsync(task, ct)) throw new ForbiddenException("You cannot update this task.");
+        var url = string.IsNullOrWhiteSpace(r.Url) ? null : r.Url.Trim();
+        if (url == task.PullRequestUrl) return await GetAsync(id, ct);
+        task.PullRequestUrl = url;
+        db.TaskHistory.Add(new TaskHistory
+        {
+            TaskId = id, ChangedByUserId = currentUser.UserId, Action = url is null ? "PullRequestRemoved" : "PullRequestLinked", Details = url
+        });
+        audit.Log("LinkPullRequest", "Task", id, newValues: new { PullRequestUrl = url });
+        try { await db.SaveChangesAsync(ct); }
+        catch (DbUpdateConcurrencyException) { throw new ConflictException("The task was modified by someone else. Reload and try again."); }
+        return await GetAsync(id, ct);
+    }
+
     public async Task<TaskDetailsDto> SetBlockedAsync(int id, SetTaskBlockedRequest r, CancellationToken ct = default)
     {
         var task = await LoadVisibleAsync(id, ct);
@@ -627,7 +646,7 @@ public class TaskService(
         await notifications.SaveAndDispatchAsync(ct);
         var dtos = files.Select(f => new TaskAttachmentDto(f.Id, f.FileName, f.ContentType, f.SizeBytes, f.UploadedByUserId, f.UploadedBy.FullName,
             f.CreatedAt, AttachmentRules.KindOfStored(f.FileName, f.ContentType), comment.Id, f.DurationSeconds)).ToList();
-        return new TaskCommentDto(comment.Id, comment.UserId, name, comment.Content, comment.CreatedAt, comment.MentionedUserIds, dtos, []);
+        return new TaskCommentDto(comment.Id, comment.UserId, name, comment.Content, comment.CreatedAt, comment.MentionedUserIds, dtos, [], comment.Source);
     }
 
     public async Task<IReadOnlyList<TaskReactionDto>> ToggleReactionAsync(int id, int commentId, ToggleReactionRequest r, CancellationToken ct = default)
@@ -722,7 +741,7 @@ public class TaskService(
     {
         await LoadVisibleAsync(id, ct, includeAssignments: false);
         return await db.TaskHistory.AsNoTracking().Where(h => h.TaskId == id).OrderByDescending(h => h.CreatedAt).ThenByDescending(h => h.Id)
-            .Select(h => new TaskHistoryDto(h.Id, h.Action, h.FromStatus, h.ToStatus, h.Details, h.ChangedBy != null ? h.ChangedBy.FullName : "System", h.CreatedAt))
+            .Select(h => new TaskHistoryDto(h.Id, h.Action, h.FromStatus, h.ToStatus, h.Details, h.ChangedBy != null ? h.ChangedBy.FullName : "System", h.CreatedAt, h.Source))
             .ToListAsync(ct);
     }
 

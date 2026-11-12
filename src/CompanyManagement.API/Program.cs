@@ -3,12 +3,15 @@ using System.Text;
 using System.Text.Json.Serialization;
 using System.Threading.RateLimiting;
 using CompanyManagement.API.Infrastructure;
+using CompanyManagement.API.Mcp;
 using CompanyManagement.Application;
 using CompanyManagement.Infrastructure;
 using CompanyManagement.Infrastructure.Persistence;
 using CompanyManagement.Infrastructure.Realtime;
 using CompanyManagement.Infrastructure.Services;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using ModelContextProtocol.Protocol;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
@@ -58,8 +61,24 @@ try
                     return Task.CompletedTask;
                 }
             };
-        });
-    builder.Services.AddAuthorization(o => o.AddPermissionPolicies());
+        })
+        // Claude (Claude Code / Claude Desktop) with a personal key — accepted only on /mcp.
+        .AddScheme<AuthenticationSchemeOptions, PersonalKeyAuthenticationHandler>(PersonalKeyAuthenticationHandler.SchemeName, null);
+    builder.Services.AddAuthorization(o =>
+    {
+        o.AddPermissionPolicies();
+        o.AddPolicy(McpSetup.Policy, p => p.AddAuthenticationSchemes(PersonalKeyAuthenticationHandler.SchemeName).RequireAuthenticatedUser());
+    });
+
+    // ---------------- MCP: TaskVeta for Claude ----------------
+    builder.Services.AddMcpServer(o =>
+        {
+            o.ServerInfo = new Implementation { Name = "taskveta", Title = "TaskVeta", Version = "1.0.0" };
+            o.ServerInstructions = TaskVetaPrompts.Instructions;
+        })
+        .WithHttpTransport(o => o.Stateless = true)
+        .WithTools<TaskVetaTools>()
+        .WithPrompts<TaskVetaPrompts>();
 
     // ---------------- MVC / validation / errors ----------------
     builder.Services.AddControllers(o => o.Filters.Add<ValidationFilter>())
@@ -91,6 +110,11 @@ try
         o.AddPolicy("refresh", ctx => RateLimitPartition.GetFixedWindowLimiter(
             "refresh:" + (ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown"),
             _ => new FixedWindowRateLimiterOptions { PermitLimit = builder.Configuration.GetValue("RateLimits:RefreshPerMinutePerIp", 300), Window = TimeSpan.FromMinutes(1) }));
+        // The personal key is checked by the endpoint's policy (after this middleware), so partition by the key itself (hashed):
+        // everyone at the office shares one IP and must not share one budget.
+        o.AddPolicy(McpSetup.Policy, ctx => RateLimitPartition.GetFixedWindowLimiter(
+            "mcp:" + McpSetup.PartitionKey(ctx),
+            _ => new FixedWindowRateLimiterOptions { PermitLimit = builder.Configuration.GetValue("RateLimits:McpPerMinutePerUser", 120), Window = TimeSpan.FromMinutes(1) }));
         // Runs after authentication, so it is partitioned per user.
         o.AddPolicy("attendance", ctx => RateLimitPartition.GetFixedWindowLimiter(
             "att:" + (ctx.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown"),
@@ -159,6 +183,7 @@ try
 
     app.MapControllers();
     app.MapHub<NotificationHub>(NotificationHub.Path);
+    app.MapMcp(McpSetup.Path).RequireAuthorization(McpSetup.Policy).RequireRateLimiting(McpSetup.Policy);
     app.MapHealthChecks("/health").AllowAnonymous();
     app.MapFallback("/api/{**path}", () => Results.NotFound()).AllowAnonymous(); // unknown API routes are 404, not the SPA
     app.MapFallbackToFile("index.html", spaFiles).AllowAnonymous();

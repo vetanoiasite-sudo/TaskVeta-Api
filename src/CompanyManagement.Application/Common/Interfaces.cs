@@ -36,6 +36,8 @@ public interface IApplicationDbContext
     DbSet<Notification> Notifications { get; }
     DbSet<AuditLog> AuditLogs { get; }
     DbSet<CompanySettings> CompanySettings { get; }
+    DbSet<PersonalAccessToken> PersonalAccessTokens { get; }
+    DbSet<ProjectDocument> ProjectDocuments { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
     Task<T> ExecuteInTransactionAsync<T>(Func<Task<T>> action, CancellationToken cancellationToken = default);
@@ -50,6 +52,17 @@ public interface ICurrentUser
     IReadOnlyCollection<string> Roles { get; }
     bool IsInRole(string role);
     bool HasPermission(string permission);
+    /// <summary>"Claude" when the request came through the MCP endpoint with a personal key; null in the TaskVeta app.</summary>
+    string? Via => null;
+}
+
+/// <summary>Plain text of uploaded documents (PDF, Word, PowerPoint, Excel, text, Markdown, CSV) so Claude can read them.</summary>
+public interface IDocumentTextExtractor
+{
+    /// <summary>True when text can be extracted from files with this extension.</summary>
+    bool Supports(string extension);
+    /// <summary>The document's text, or null when it has none / cannot be read.</summary>
+    string? Extract(Stream content, string extension);
 }
 
 /// <summary>Clock aware of the company's configured time zone.</summary>

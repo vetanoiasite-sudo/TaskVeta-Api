@@ -130,3 +130,16 @@ public enum NotificationType
     TaskBlocked = 13,
     ProjectMembership = 14
 }
+
+/// <summary>Follows the company documentation templates (01-DISCOVERY … 07-SUPPORT).</summary>
+public enum ProjectDocumentCategory
+{
+    Discovery = 1,
+    BusinessRequirements = 2,
+    Design = 3,
+    Technical = 4,
+    Testing = 5,
+    Meeting = 6,
+    Client = 7,
+    Other = 8
+}

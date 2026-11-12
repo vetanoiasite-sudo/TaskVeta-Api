@@ -297,6 +297,37 @@ public class ProjectConfiguration : IEntityTypeConfiguration<Project>
     }
 }
 
+public class ProjectDocumentConfiguration : IEntityTypeConfiguration<ProjectDocument>
+{
+    public void Configure(EntityTypeBuilder<ProjectDocument> b)
+    {
+        b.ToTable("ProjectDocuments");
+        b.Property(d => d.Title).HasMaxLength(200).IsRequired();
+        b.Property(d => d.FileName).HasMaxLength(255).IsRequired();
+        b.Property(d => d.StoredFileName).HasMaxLength(100).IsRequired();
+        b.Property(d => d.ContentType).HasMaxLength(150).IsRequired();
+        b.Property(d => d.Source).HasMaxLength(20);
+        b.HasIndex(d => d.StoredFileName).IsUnique();
+        b.HasIndex(d => new { d.ProjectId, d.Category });
+        b.HasOne(d => d.Project).WithMany(p => p.Documents).HasForeignKey(d => d.ProjectId).OnDelete(DeleteBehavior.Cascade);
+        b.HasOne(d => d.UploadedBy).WithMany().HasForeignKey(d => d.UploadedByUserId).OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public class PersonalAccessTokenConfiguration : IEntityTypeConfiguration<PersonalAccessToken>
+{
+    public void Configure(EntityTypeBuilder<PersonalAccessToken> b)
+    {
+        b.ToTable("PersonalAccessTokens");
+        b.Property(t => t.Name).HasMaxLength(100).IsRequired();
+        b.Property(t => t.TokenHash).HasMaxLength(128).IsRequired();
+        b.Property(t => t.Hint).HasMaxLength(20).IsRequired();
+        b.HasIndex(t => t.TokenHash).IsUnique();
+        b.HasIndex(t => t.UserId);
+        b.HasOne(t => t.User).WithMany().HasForeignKey(t => t.UserId).OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
 public class ProjectMemberConfiguration : IEntityTypeConfiguration<ProjectMember>
 {
     public void Configure(EntityTypeBuilder<ProjectMember> b)
@@ -396,6 +427,7 @@ public class TaskHistoryConfiguration : IEntityTypeConfiguration<TaskHistory>
         b.ToTable("TaskHistory");
         b.Property(h => h.Action).HasMaxLength(50).IsRequired();
         b.Property(h => h.Details).HasMaxLength(2000);
+        b.Property(h => h.Source).HasMaxLength(20);
         b.HasIndex(h => new { h.TaskId, h.CreatedAt });
         b.HasOne(h => h.Task).WithMany(t => t.History).HasForeignKey(h => h.TaskId).OnDelete(DeleteBehavior.Cascade);
         b.HasOne(h => h.ChangedBy).WithMany().HasForeignKey(h => h.ChangedByUserId).OnDelete(DeleteBehavior.NoAction);
@@ -431,6 +463,7 @@ public class AuditLogConfiguration : IEntityTypeConfiguration<AuditLog>
         b.Property(a => a.EntityId).HasMaxLength(50);
         b.Property(a => a.Reason).HasMaxLength(1000);
         b.Property(a => a.IpAddress).HasMaxLength(64);
+        b.Property(a => a.Source).HasMaxLength(20);
         b.HasIndex(a => new { a.EntityName, a.EntityId });
         b.HasIndex(a => a.CreatedAt);
         b.HasIndex(a => a.UserId);

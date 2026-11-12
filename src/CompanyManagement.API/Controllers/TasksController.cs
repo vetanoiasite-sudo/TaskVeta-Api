@@ -83,6 +83,11 @@ public class TasksController(ITaskService tasks, IExportService export) : Contro
     public async Task<ActionResult<TaskDetailsDto>> SetBlocked(int id, SetTaskBlockedRequest request, CancellationToken ct) =>
         Ok(await tasks.SetBlockedAsync(id, request, ct));
 
+    /// <summary>Link the pull request that implements the task (or clear it with <c>url: null</c>). Assignees and reviewers.</summary>
+    [HttpPatch("{id:int}/pull-request")]
+    public async Task<ActionResult<TaskDetailsDto>> SetPullRequest(int id, SetPullRequestRequest request, CancellationToken ct) =>
+        Ok(await tasks.SetPullRequestAsync(id, request, ct));
+
     /// <summary>Move the task to a sprint, or back to the backlog with <c>sprintId: null</c>.</summary>
     [HttpPatch("{id:int}/sprint")]
     public async Task<ActionResult<TaskDetailsDto>> SetSprint(int id, SetTaskSprintRequest request, CancellationToken ct) =>

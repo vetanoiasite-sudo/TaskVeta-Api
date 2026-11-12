@@ -5,6 +5,7 @@ using CompanyManagement.Application.Features.Auth;
 using CompanyManagement.Application.Features.Notifications;
 using CompanyManagement.Application.Features.Organization;
 using CompanyManagement.Application.Features.Projects;
+using CompanyManagement.Application.Features.Claude;
 using CompanyManagement.Application.Features.Reports;
 using CompanyManagement.Application.Features.Settings;
 using CompanyManagement.Application.Features.Sprints;
@@ -36,6 +37,8 @@ public static class DependencyInjection
         services.AddScoped<IAttendanceMonitor, AttendanceMonitor>();
         services.AddScoped<ITaskService, TaskService>();
         services.AddScoped<IProjectService, ProjectService>();
+        services.AddScoped<IProjectDocumentService, ProjectDocumentService>();
+        services.AddScoped<IPersonalKeyService, PersonalKeyService>();
         services.AddScoped<ITaskDeadlineMonitor, TaskDeadlineMonitor>();
         services.AddScoped<INotificationQueryService, NotificationQueryService>();
         services.AddScoped<IReportService, ReportService>();

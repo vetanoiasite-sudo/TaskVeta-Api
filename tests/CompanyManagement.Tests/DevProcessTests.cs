@@ -1,4 +1,5 @@
 using CompanyManagement.Application.Common;
+using CompanyManagement.Application.Features.Claude;
 using CompanyManagement.Application.Features.Projects;
 using CompanyManagement.Application.Features.Sprints;
 using CompanyManagement.Application.Features.Tasks;
@@ -17,7 +18,7 @@ namespace CompanyManagement.Tests;
 /// Task keys, types, project roles, sub-tasks, dependencies, blocked flag and sprints — the features that make
 /// TaskVeta follow the company Way of Working. Runs the real services on an in-memory database.
 /// </summary>
-public class DevProcessTests
+public partial class DevProcessTests
 {
     // ------------------------------------------------------------------ test world
 
@@ -28,9 +29,14 @@ public class DevProcessTests
     {
         private readonly string _db = Guid.NewGuid().ToString();
         public readonly FakeTimeProvider Time = new(new DateTimeOffset(2026, 11, 12, 10, 0, 0, TimeSpan.Zero));
+        public readonly MemoryStorage Files = new();
 
-        public AppDbContext NewContext() =>
-            new(new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(_db).Options, Time);
+        public AppDbContext NewContext(SourceStampInterceptor? interceptor = null)
+        {
+            var options = new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(_db);
+            if (interceptor is not null) options.AddInterceptors(interceptor);
+            return new(options.Options, Time);
+        }
 
         public World()
         {
@@ -52,6 +58,8 @@ public class DevProcessTests
         }
 
         public Actor As(int userId, params string[] roles) => new(this, userId, roles);
+        /// <summary>The same person, but acting through Claude (a personal key on /mcp).</summary>
+        public Actor ViaClaude(int userId, params string[] roles) => new(this, userId, roles, "Claude");
         public Actor AsAdmin() => As(Admin, Roles.SuperAdmin);
     }
 
@@ -62,11 +70,13 @@ public class DevProcessTests
         public readonly ProjectService Projects;
         public readonly SprintService Sprints;
         public readonly NotificationService Notifications;
+        public readonly ProjectDocumentService Documents;
+        public readonly PersonalKeyService Keys;
 
-        public Actor(World w, int userId, string[] roles)
+        public Actor(World w, int userId, string[] roles, string? via = null)
         {
-            Db = w.NewContext();
-            var user = new FakeUser(userId, roles);
+            var user = new FakeUser(userId, roles, via);
+            Db = w.NewContext(new SourceStampInterceptor(user));
             var scope = new AccessScope(Db, user);
             var access = new ProjectAccess(Db, scope, user);
             var clock = new FakeClock(w.Time);
@@ -74,11 +84,15 @@ public class DevProcessTests
             Tasks = new TaskService(Db, scope, access, user, clock, new NoAudit(), Notifications, new NullStorage());
             Projects = new ProjectService(Db, new NoAudit(), Tasks, access, Notifications, user);
             Sprints = new SprintService(Db, Tasks, new NoAudit(), user, clock);
+            Documents = new ProjectDocumentService(Db, Tasks, access, user, w.Files, new DocumentTextExtractor(NullLogger<DocumentTextExtractor>.Instance), new NoAudit());
+            Keys = new PersonalKeyService(Db, user, new TokenService(Microsoft.Extensions.Options.Options.Create(new JwtOptions { SigningKey = new string('k', 40) }), w.Time),
+                new NoAudit(), clock);
         }
     }
 
-    private sealed class FakeUser(int id, string[] roles) : ICurrentUser
+    private sealed class FakeUser(int id, string[] roles, string? via = null) : ICurrentUser
     {
+        public string? Via => via;
         public int? UserId => id;
         public string? UserName => $"user{id}";
         public string? IpAddress => null;
@@ -108,6 +122,21 @@ public class DevProcessTests
     private sealed class NullRealtime : IRealtimeNotifier
     {
         public Task PushAsync(int userId, object payload, CancellationToken ct = default) => Task.CompletedTask;
+    }
+
+    private sealed class MemoryStorage : IFileStorage
+    {
+        public readonly Dictionary<string, byte[]> Saved = new();
+        public async Task<string> SaveAsync(Stream content, string extension, CancellationToken ct = default)
+        {
+            using var ms = new MemoryStream();
+            await content.CopyToAsync(ms, ct);
+            var name = Guid.NewGuid().ToString("N") + extension;
+            Saved[name] = ms.ToArray();
+            return name;
+        }
+        public Stream OpenRead(string storedFileName) => new MemoryStream(Saved[storedFileName]);
+        public void Delete(string storedFileName) => Saved.Remove(storedFileName);
     }
 
     private sealed class NullStorage : IFileStorage

@@ -59,6 +59,11 @@ public interface IAuthService
     Task<CurrentUserDto> GetCurrentUserAsync(CancellationToken ct = default);
     Task ChangePasswordAsync(ChangePasswordRequest request, CancellationToken ct = default);
     Task SetLanguageAsync(string language, CancellationToken ct = default);
+    /// <summary>
+    /// Checks a personal key (sent by Claude to <c>/mcp</c>) and returns who it belongs to, with the same roles as a normal login.
+    /// Null when the key is unknown, revoked, expired, or its user is deactivated / locked out.
+    /// </summary>
+    Task<CurrentUserDto?> AuthenticatePersonalKeyAsync(string rawKey, CancellationToken ct = default);
 }
 
 public class AuthService(
@@ -199,6 +204,25 @@ public class AuthService(
         var user = await RequireCurrentUserAsync();
         user.PreferredLanguage = language;
         await userManager.UpdateAsync(user);
+    }
+
+    public async Task<CurrentUserDto?> AuthenticatePersonalKeyAsync(string rawKey, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(rawKey) || !rawKey.StartsWith(PersonalAccessToken.KeyPrefix, StringComparison.Ordinal) || rawKey.Length > 200)
+            return null;
+        var hash = tokens.HashToken(rawKey);
+        var key = await db.PersonalAccessTokens.FirstOrDefaultAsync(k => k.TokenHash == hash, ct);
+        var now = clock.UtcNow;
+        if (key is null || !key.IsActive(now)) return null;
+        var user = await userManager.FindByIdAsync(key.UserId.ToString());
+        if (user is null || !user.IsActive || await userManager.IsLockedOutAsync(user)) return null;
+        // Remember when the key was last used (at most once every 5 minutes to avoid a write per call).
+        if (key.LastUsedAt is null || now - key.LastUsedAt > TimeSpan.FromMinutes(5))
+        {
+            key.LastUsedAt = now;
+            await db.SaveChangesAsync(ct);
+        }
+        return await BuildUserDtoAsync(user, ct);
     }
 
     private async Task<ApplicationUser> RequireCurrentUserAsync()

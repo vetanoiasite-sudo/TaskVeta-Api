@@ -4,7 +4,7 @@ using Microsoft.EntityFrameworkCore;
 namespace CompanyManagement.Application.Features.Audit;
 
 public record AuditLogDto(long Id, int? UserId, string? UserName, string Action, string EntityName, string? EntityId,
-    string? OldValues, string? NewValues, string? Reason, string? IpAddress, DateTime CreatedAt);
+    string? OldValues, string? NewValues, string? Reason, string? IpAddress, DateTime CreatedAt, string? Source = null);
 
 public class AuditQuery : PagedRequest
 {
@@ -38,7 +38,7 @@ public class AuditQueryService(IApplicationDbContext db) : IAuditQueryService
             query = query.Where(a => a.UserName!.ToLower().Contains(s) || a.Action.ToLower().Contains(s) || a.EntityName.ToLower().Contains(s) || a.Reason!.ToLower().Contains(s));
         }
         return await query.OrderByDescending(a => a.Id)
-            .Select(a => new AuditLogDto(a.Id, a.UserId, a.UserName, a.Action, a.EntityName, a.EntityId, a.OldValues, a.NewValues, a.Reason, a.IpAddress, a.CreatedAt))
+            .Select(a => new AuditLogDto(a.Id, a.UserId, a.UserName, a.Action, a.EntityName, a.EntityId, a.OldValues, a.NewValues, a.Reason, a.IpAddress, a.CreatedAt, a.Source))
             .ToPagedAsync(q, ct);
     }
 }

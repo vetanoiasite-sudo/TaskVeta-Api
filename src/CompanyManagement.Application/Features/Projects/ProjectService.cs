@@ -10,17 +10,21 @@ namespace CompanyManagement.Application.Features.Projects;
 
 public record ProjectMemberDto(int Id, int EmployeeId, string Name, string EmployeeCode, int? UserId, ProjectRole Role);
 
-/// <summary>Task counts cover all tasks of the project. <c>CanManage</c>: the current user may edit the project and its members.</summary>
+/// <summary>
+/// Task counts cover all tasks of the project. <c>CanManage</c>: the current user may edit the project and its members.
+/// <c>LogoVersion</c>: changes whenever the logo changes (null when there is none), for cache busting.
+/// </summary>
 public record ProjectDto(int Id, string Name, string? NameAr, string Code, string? Description, ProjectStatus Status,
     DateOnly? StartDate, DateOnly? EndDate, int TaskCount, int CompletedTaskCount, int OverdueTaskCount, int ProgressPercent,
-    DateTime CreatedAt, DateTime UpdatedAt, string? ClientName, string? RepositoryUrl, string? DesignUrl, string? DocsUrl,
+    DateTime CreatedAt, DateTime UpdatedAt, string? ClientName, string? BackendRepositoryUrl, string? FrontendRepositoryUrl,
+    string? DesignUrl, string? DocsUrl, string? LogoVersion,
     int? CreatedByUserId, IReadOnlyList<ProjectMemberDto> Members, bool CanManage, bool CanLead, ProjectRole[] MyRoles);
 
-public record ProjectLookupDto(int Id, string Name, string? NameAr, string Code, ProjectStatus Status);
+public record ProjectLookupDto(int Id, string Name, string? NameAr, string Code, ProjectStatus Status, string? LogoVersion = null);
 
 public record SaveProjectRequest(string Name, string? NameAr, string Code, string? Description, ProjectStatus Status,
-    DateOnly? StartDate, DateOnly? EndDate, string? ClientName = null, string? RepositoryUrl = null, string? DesignUrl = null,
-    string? DocsUrl = null);
+    DateOnly? StartDate, DateOnly? EndDate, string? ClientName = null, string? BackendRepositoryUrl = null,
+    string? FrontendRepositoryUrl = null, string? DesignUrl = null, string? DocsUrl = null);
 
 public record AddProjectMemberRequest(int EmployeeId, ProjectRole Role);
 
@@ -42,7 +46,7 @@ public class SaveProjectRequestValidator : AbstractValidator<SaveProjectRequest>
         RuleFor(x => x.EndDate).GreaterThanOrEqualTo(x => x.StartDate).When(x => x.StartDate.HasValue && x.EndDate.HasValue)
             .WithMessage("End date must be on or after the start date.");
         RuleFor(x => x.ClientName).MaximumLength(150);
-        RuleForEach(x => new[] { x.RepositoryUrl, x.DesignUrl, x.DocsUrl })
+        RuleForEach(x => new[] { x.BackendRepositoryUrl, x.FrontendRepositoryUrl, x.DesignUrl, x.DocsUrl })
             .Must(u => string.IsNullOrWhiteSpace(u) || (u.Length <= 500 && IsHttpUrl(u.Trim())))
             .OverridePropertyName("Links").WithMessage("Links must be valid http(s) URLs.");
     }
@@ -73,6 +77,11 @@ public interface IProjectService
     Task<ProjectDto> RemoveMemberAsync(int id, int memberId, CancellationToken ct = default);
     /// <summary>Active employees that can be added as members (only for people who manage the project).</summary>
     Task<IReadOnlyList<ProjectMemberCandidateDto>> MemberCandidatesAsync(int id, CancellationToken ct = default);
+    /// <summary>Sets the project's logo (PNG, JPEG, WebP or GIF, 2 MB at most). For the people who manage the project.</summary>
+    Task<ProjectDto> SetLogoAsync(int id, string fileName, long size, Stream content, CancellationToken ct = default);
+    Task<ProjectDto> RemoveLogoAsync(int id, CancellationToken ct = default);
+    /// <summary>The logo of a project the user can see, or of a project linked to the signed-in client. Null when it has none.</summary>
+    Task<(Stream Content, string ContentType)?> OpenLogoAsync(int id, CancellationToken ct = default);
 }
 
 public class ProjectService(
@@ -81,8 +90,12 @@ public class ProjectService(
     ITaskService tasks,
     IProjectAccess access,
     INotificationService notifications,
-    ICurrentUser currentUser) : IProjectService
+    ICurrentUser currentUser,
+    IFileStorage storage) : IProjectService
 {
+    public const long MaxLogoBytes = 2 * 1024 * 1024;
+    private static readonly string[] LogoExtensions = [".png", ".jpg", ".jpeg", ".webp", ".gif"];
+
     public async Task<IReadOnlyList<ProjectDto>> GetAllAsync(CancellationToken ct = default)
     {
         var allowed = await tasks.AccessibleProjectIdsAsync(ct);
@@ -104,7 +117,8 @@ public class ProjectService(
         var query = db.Projects.AsNoTracking();
         if (!currentUser.HasPermission(Permissions.TasksAssign) && await tasks.AccessibleProjectIdsAsync(ct) is { } allowed)
             query = query.Where(p => allowed.Contains(p.Id));
-        return await query.OrderBy(p => p.Name).Select(p => new ProjectLookupDto(p.Id, p.Name, p.NameAr, p.Code, p.Status)).ToListAsync(ct);
+        return await query.OrderBy(p => p.Name)
+            .Select(p => new ProjectLookupDto(p.Id, p.Name, p.NameAr, p.Code, p.Status, p.LogoStoredFileName)).ToListAsync(ct);
     }
 
     public async Task<ProjectDto> GetAsync(int id, CancellationToken ct = default)
@@ -145,7 +159,7 @@ public class ProjectService(
         await EnsureUniqueCodeAsync(id, r.Code, ct);
         if (!string.Equals(p.Code, r.Code.Trim(), StringComparison.OrdinalIgnoreCase) && await db.Tasks.AnyAsync(t => t.ProjectId == id, ct))
             throw new BadRequestException("The project code cannot change once it has tasks: it is part of every task key.");
-        var old = new { p.Name, p.NameAr, p.Code, p.Description, Status = p.Status.ToString(), p.StartDate, p.EndDate, p.ClientName, p.RepositoryUrl, p.DesignUrl, p.DocsUrl };
+        var old = new { p.Name, p.NameAr, p.Code, p.Description, Status = p.Status.ToString(), p.StartDate, p.EndDate, p.ClientName, p.BackendRepositoryUrl, p.FrontendRepositoryUrl, p.DesignUrl, p.DocsUrl };
         Apply(p, r);
         audit.Log("Update", nameof(Project), id, old, r);
         await db.SaveChangesAsync(ct);
@@ -164,7 +178,75 @@ public class ProjectService(
         db.Projects.Remove(p);
         audit.Log("Delete", nameof(Project), id, new { p.Name, p.Code, UnlinkedTasks = taskCount });
         await db.SaveChangesAsync(ct);
+        if (p.LogoStoredFileName is { } logo) storage.Delete(logo);
     }
+
+    public async Task<ProjectDto> SetLogoAsync(int id, string fileName, long size, Stream content, CancellationToken ct = default)
+    {
+        var p = await db.Projects.FindAsync([id], ct) ?? throw new NotFoundException("Project", id);
+        await EnsureCanManageAsync(id, ct);
+        var ext = Path.GetExtension(fileName).ToLowerInvariant();
+        if (!LogoExtensions.Contains(ext)) throw new BadRequestException("The logo must be a PNG, JPEG, WebP or GIF image.");
+        if (size <= 0 || size > MaxLogoBytes) throw new BadRequestException("The logo must be 2 MB at most.");
+        if (!content.CanSeek)
+        {
+            var copy = new MemoryStream();
+            await content.CopyToAsync(copy, ct);
+            content = copy;
+        }
+        content.Position = 0;
+        var head = new byte[16];
+        var read = await content.ReadAtLeastAsync(head, head.Length, throwOnEndOfStream: false, ct);
+        if (!AttachmentRules.SignatureMatches(ext, head[..read])) throw new BadRequestException("The file is not a valid image.");
+        content.Position = 0;
+
+        var stored = await storage.SaveAsync(content, ext, ct);
+        var previous = p.LogoStoredFileName;
+        p.LogoStoredFileName = stored;
+        p.LogoContentType = AttachmentRules.SafeContentType(ext, AttachmentKind.Image);
+        audit.Log("SetLogo", nameof(Project), id);
+        try { await db.SaveChangesAsync(ct); }
+        catch { storage.Delete(stored); throw; }
+        if (previous is not null) storage.Delete(previous);
+        return await GetAsync(id, ct);
+    }
+
+    public async Task<ProjectDto> RemoveLogoAsync(int id, CancellationToken ct = default)
+    {
+        var p = await db.Projects.FindAsync([id], ct) ?? throw new NotFoundException("Project", id);
+        await EnsureCanManageAsync(id, ct);
+        if (p.LogoStoredFileName is { } previous)
+        {
+            p.LogoStoredFileName = null;
+            p.LogoContentType = null;
+            audit.Log("RemoveLogo", nameof(Project), id);
+            await db.SaveChangesAsync(ct);
+            storage.Delete(previous);
+        }
+        return await GetAsync(id, ct);
+    }
+
+    public async Task<(Stream Content, string ContentType)?> OpenLogoAsync(int id, CancellationToken ct = default)
+    {
+        var logo = await db.Projects.AsNoTracking().Where(p => p.Id == id)
+            .Select(p => new { p.LogoStoredFileName, p.LogoContentType }).FirstOrDefaultAsync(ct) ?? throw new NotFoundException("Project", id);
+        // Logos are shown wherever a project appears (task forms, lookups, the client portal), so anyone who can name
+        // the project may see its logo: staff with access, and clients the project is linked to.
+        if (currentUser.IsInRole(Roles.Client))
+        {
+            if (!await db.ClientProjects.AnyAsync(cp => cp.ProjectId == id && cp.Client.UserId == currentUser.UserId, ct))
+                throw new NotFoundException("Project", id);
+        }
+        else if (!currentUser.HasPermission(Permissions.TasksAssign) && !currentUser.HasPermission(Permissions.ClientsManage)
+                 && !currentUser.HasPermission(Permissions.SupportManage)
+                 && await tasks.AccessibleProjectIdsAsync(ct) is { } allowed && !allowed.Contains(id))
+            throw new NotFoundException("Project", id);
+        if (logo.LogoStoredFileName is null) return null;
+        return (storage.OpenRead(logo.LogoStoredFileName), logo.LogoContentType ?? "image/png");
+    }
+
+    /// <summary>The stored file name is random and changes with every upload, so it doubles as a cache-busting version.</summary>
+    private static string? LogoVersion(Project p) => p.LogoStoredFileName is { } f ? Path.GetFileNameWithoutExtension(f) : null;
 
     public async Task<ProjectDto> AddMemberAsync(int id, AddProjectMemberRequest r, CancellationToken ct = default)
     {
@@ -245,7 +327,8 @@ public class ProjectService(
         p.StartDate = r.StartDate;
         p.EndDate = r.EndDate;
         p.ClientName = Clean(r.ClientName);
-        p.RepositoryUrl = Clean(r.RepositoryUrl);
+        p.BackendRepositoryUrl = Clean(r.BackendRepositoryUrl);
+        p.FrontendRepositoryUrl = Clean(r.FrontendRepositoryUrl);
         p.DesignUrl = Clean(r.DesignUrl);
         p.DocsUrl = Clean(r.DocsUrl);
     }
@@ -257,7 +340,7 @@ public class ProjectService(
                         || myRoles.Contains(ProjectRole.BrOwner);
         return new ProjectDto(p.Id, p.Name, p.NameAr, p.Code, p.Description, p.Status, p.StartDate, p.EndDate,
             s?.Total ?? 0, s?.Completed ?? 0, s?.Overdue ?? 0, s?.ProgressPercent ?? 0, p.CreatedAt, p.UpdatedAt,
-            p.ClientName, p.RepositoryUrl, p.DesignUrl, p.DocsUrl, p.CreatedByUserId, members, canManage,
+            p.ClientName, p.BackendRepositoryUrl, p.FrontendRepositoryUrl, p.DesignUrl, p.DocsUrl, LogoVersion(p), p.CreatedByUserId, members, canManage,
             canManage || myRoles.Any(ProjectMember.IsLeadRole), myRoles);
     }
 }

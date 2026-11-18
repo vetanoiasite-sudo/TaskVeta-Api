@@ -38,6 +38,13 @@ public interface IApplicationDbContext
     DbSet<CompanySettings> CompanySettings { get; }
     DbSet<PersonalAccessToken> PersonalAccessTokens { get; }
     DbSet<ProjectDocument> ProjectDocuments { get; }
+    DbSet<Client> Clients { get; }
+    DbSet<ClientProject> ClientProjects { get; }
+    DbSet<ClientProjectNote> ClientProjectNotes { get; }
+    DbSet<SupportTicket> SupportTickets { get; }
+    DbSet<TicketMessage> TicketMessages { get; }
+    DbSet<TicketAttachment> TicketAttachments { get; }
+    DbSet<CompanyTemplate> CompanyTemplates { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
     Task<T> ExecuteInTransactionAsync<T>(Func<Task<T>> action, CancellationToken cancellationToken = default);

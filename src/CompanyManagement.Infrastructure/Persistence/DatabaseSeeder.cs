@@ -49,6 +49,7 @@ public class DatabaseSeeder(
             [Roles.Admin] = "HR / administration: attendance for all employees, corrections, reports, tasks",
             [Roles.Manager] = "Manager / team leader: attendance and tasks of assigned department or teams",
             [Roles.Employee] = "Employee: own attendance and assigned tasks",
+            [Roles.Client] = "Client: the client portal only (own support tickets and projects)",
         };
         foreach (var (name, description) in descriptions)
             if (!await roles.RoleExistsAsync(name))

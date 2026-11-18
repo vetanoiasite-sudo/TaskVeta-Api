@@ -128,7 +128,43 @@ public enum NotificationType
     System = 11,
     TaskMention = 12,
     TaskBlocked = 13,
-    ProjectMembership = 14
+    ProjectMembership = 14,
+    /// <summary>A client opened a support ticket.</summary>
+    TicketCreated = 15,
+    /// <summary>A new message on a support ticket.</summary>
+    TicketReply = 16,
+    /// <summary>A support ticket changed status or was assigned.</summary>
+    TicketStatusChanged = 17
+}
+
+/// <summary>What a client's support ticket is about.</summary>
+public enum TicketCategory
+{
+    Bug = 1,
+    FeatureRequest = 2,
+    Question = 3,
+    Performance = 4,
+    AccountAccess = 5,
+    DataIssue = 6,
+    Other = 7
+}
+
+public enum TicketPriority
+{
+    Low = 1,
+    Medium = 2,
+    High = 3,
+    Urgent = 4
+}
+
+/// <summary>Open → InProgress → (WaitingForClient ↔ InProgress) → Resolved → Closed. A client reply reopens a resolved ticket.</summary>
+public enum TicketStatus
+{
+    Open = 1,
+    InProgress = 2,
+    WaitingForClient = 3,
+    Resolved = 4,
+    Closed = 5
 }
 
 /// <summary>Follows the company documentation templates (01-DISCOVERY … 07-SUPPORT).</summary>

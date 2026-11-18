@@ -11,8 +11,10 @@ public record LoginRequest(string Email, string Password);
 public record RegisterRequest(string Email, string FullName, string Password, string Role, int? EmployeeId);
 public record ChangePasswordRequest(string CurrentPassword, string NewPassword);
 
+/// <param name="MustChangePassword">The account still has a temporary password: the app must ask for a new one first.</param>
+/// <param name="IsClient">A client account: the app shows the client portal only.</param>
 public record CurrentUserDto(int Id, string FullName, string Email, string[] Roles, string[] Permissions,
-    int? EmployeeId, string PreferredLanguage);
+    int? EmployeeId, string PreferredLanguage, bool MustChangePassword = false, bool IsClient = false);
 
 public record AuthResponse(string AccessToken, DateTime ExpiresAt, CurrentUserDto User);
 
@@ -191,6 +193,11 @@ public class AuthService(
         var user = await RequireCurrentUserAsync();
         var result = await userManager.ChangePasswordAsync(user, request.CurrentPassword, request.NewPassword);
         if (!result.Succeeded) throw new BadRequestException(string.Join(" ", result.Errors.Select(e => e.Description)));
+        if (user.MustChangePassword)
+        {
+            user.MustChangePassword = false;
+            await userManager.UpdateAsync(user);
+        }
         // Invalidate all sessions after a password change.
         var active = await db.RefreshTokens.Where(t => t.UserId == user.Id && t.RevokedAt == null).ToListAsync(ct);
         foreach (var t in active) { t.RevokedAt = clock.UtcNow; t.RevokedReason = "Password changed"; }
@@ -283,5 +290,5 @@ public class AuthService(
 
     private static CurrentUserDto ToDto(ApplicationUser user, string[] roles, int? employeeId) =>
         new(user.Id, user.FullName, user.Email ?? string.Empty, roles, Permissions.ForRoles(roles).ToArray(),
-            employeeId, user.PreferredLanguage);
+            employeeId, user.PreferredLanguage, user.MustChangePassword, roles.Contains(Roles.Client));
 }

@@ -18,9 +18,16 @@ public class Project : BaseEntity
     public DateOnly? EndDate { get; set; }
 
     public string? ClientName { get; set; }
-    public string? RepositoryUrl { get; set; }
+    /// <summary>Backend repository (e.g. GitHub).</summary>
+    public string? BackendRepositoryUrl { get; set; }
+    /// <summary>Frontend repository (e.g. GitHub).</summary>
+    public string? FrontendRepositoryUrl { get; set; }
     public string? DesignUrl { get; set; }
     public string? DocsUrl { get; set; }
+
+    /// <summary>The project's logo (an image stored outside the web root); null when it has none.</summary>
+    public string? LogoStoredFileName { get; set; }
+    public string? LogoContentType { get; set; }
 
     /// <summary>Who created the project (manages it like its BR Owner). Null for projects created before this field existed.</summary>
     public int? CreatedByUserId { get; set; }

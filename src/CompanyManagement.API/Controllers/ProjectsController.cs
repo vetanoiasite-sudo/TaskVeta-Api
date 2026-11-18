@@ -59,6 +59,33 @@ public class ProjectsController(IProjectService projects, IProjectDocumentServic
     public async Task<ActionResult<ProjectDto>> RemoveMember(int id, int memberId, CancellationToken ct) =>
         Ok(await projects.RemoveMemberAsync(id, memberId, ct));
 
+    // ------------------------------------------------------------------ logo
+
+    /// <summary>The project's logo image (404 when it has none).</summary>
+    [HttpGet("{id:int}/logo")]
+    public async Task<IActionResult> Logo(int id, CancellationToken ct)
+    {
+        if (await projects.OpenLogoAsync(id, ct) is not { } logo) return NotFound();
+        Response.Headers["X-Content-Type-Options"] = "nosniff";
+        Response.Headers["Content-Security-Policy"] = "sandbox; default-src 'none'";
+        Response.Headers.CacheControl = "private, max-age=86400";
+        return File(logo.Content, logo.ContentType);
+    }
+
+    /// <summary>Upload the project's logo: PNG, JPEG, WebP or GIF, 2 MB at most. Replaces the current one.</summary>
+    [HttpPut("{id:int}/logo")]
+    [RequestSizeLimit(ProjectService.MaxLogoBytes + 64 * 1024)]
+    [RequestFormLimits(MultipartBodyLengthLimit = ProjectService.MaxLogoBytes + 64 * 1024)]
+    public async Task<ActionResult<ProjectDto>> SetLogo(int id, IFormFile file, CancellationToken ct)
+    {
+        if (file is null || file.Length == 0) throw new BadRequestException("No file was uploaded.");
+        await using var stream = file.OpenReadStream();
+        return Ok(await projects.SetLogoAsync(id, file.FileName, file.Length, stream, ct));
+    }
+
+    [HttpDelete("{id:int}/logo")]
+    public async Task<ActionResult<ProjectDto>> RemoveLogo(int id, CancellationToken ct) => Ok(await projects.RemoveLogoAsync(id, ct));
+
     // ------------------------------------------------------------------ documents
 
     /// <summary>The project's documents (Discovery, BR, design, meetings, client files…).</summary>

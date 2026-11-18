@@ -58,6 +58,9 @@ public class UserService(
     public async Task<PagedResult<UserDto>> GetPagedAsync(UserQuery q, CancellationToken ct = default)
     {
         var query = db.Users.AsQueryable();
+        // Client accounts are managed from the Clients page, not here.
+        var clientRoleId = await db.Roles.Where(r => r.Name == Domain.Security.Roles.Client).Select(r => (int?)r.Id).FirstOrDefaultAsync(ct);
+        if (clientRoleId is int clientRole) query = query.Where(u => !db.UserRoles.Any(ur => ur.UserId == u.Id && ur.RoleId == clientRole));
         if (q.IsActive is bool a) query = query.Where(u => u.IsActive == a);
         if (!string.IsNullOrWhiteSpace(q.Search))
         {

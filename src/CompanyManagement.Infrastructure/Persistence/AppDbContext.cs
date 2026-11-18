@@ -36,6 +36,13 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, TimeProvider t
     public DbSet<CompanySettings> CompanySettings => Set<CompanySettings>();
     public DbSet<PersonalAccessToken> PersonalAccessTokens => Set<PersonalAccessToken>();
     public DbSet<ProjectDocument> ProjectDocuments => Set<ProjectDocument>();
+    public DbSet<Client> Clients => Set<Client>();
+    public DbSet<ClientProject> ClientProjects => Set<ClientProject>();
+    public DbSet<ClientProjectNote> ClientProjectNotes => Set<ClientProjectNote>();
+    public DbSet<SupportTicket> SupportTickets => Set<SupportTicket>();
+    public DbSet<TicketMessage> TicketMessages => Set<TicketMessage>();
+    public DbSet<TicketAttachment> TicketAttachments => Set<TicketAttachment>();
+    public DbSet<CompanyTemplate> CompanyTemplates => Set<CompanyTemplate>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {

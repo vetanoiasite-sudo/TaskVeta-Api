@@ -43,6 +43,7 @@ public class TokenService(IOptions<JwtOptions> options, TimeProvider time) : ITo
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString("N")),
         };
         if (employeeId is int e) claims.Add(new Claim(AppClaims.EmployeeId, e.ToString()));
+        if (user.MustChangePassword) claims.Add(new Claim(AppClaims.MustChangePassword, "1"));
         claims.AddRange(roles.Select(r => new Claim(ClaimTypes.Role, r)));
 
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_o.SigningKey));

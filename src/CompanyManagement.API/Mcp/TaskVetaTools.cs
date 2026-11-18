@@ -111,7 +111,7 @@ public class TaskVetaTools(
         return new
         {
             p.Code, p.Name, p.NameAr, p.ClientName, p.Description, p.Status, Start = p.StartDate, End = p.EndDate,
-            Links = new { p.RepositoryUrl, p.DesignUrl, p.DocsUrl },
+            Links = new { p.BackendRepositoryUrl, p.FrontendRepositoryUrl, p.DesignUrl, p.DocsUrl },
             Progress = new { p.ProgressPercent, Tasks = p.TaskCount, Completed = p.CompletedTaskCount, Overdue = p.OverdueTaskCount },
             Members = p.Members.Select(m => new { m.Name, m.Role }),
             Documents = docs.Select(DocLine),

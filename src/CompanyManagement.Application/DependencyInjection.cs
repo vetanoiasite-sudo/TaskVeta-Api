@@ -38,6 +38,9 @@ public static class DependencyInjection
         services.AddScoped<ITaskService, TaskService>();
         services.AddScoped<IProjectService, ProjectService>();
         services.AddScoped<IProjectDocumentService, ProjectDocumentService>();
+        services.AddScoped<Features.Clients.IClientService, Features.Clients.ClientService>();
+        services.AddScoped<Features.Clients.ITicketService, Features.Clients.TicketService>();
+        services.AddScoped<Features.Clients.ITemplateService, Features.Clients.TemplateService>();
         services.AddScoped<IPersonalKeyService, PersonalKeyService>();
         services.AddScoped<ITaskDeadlineMonitor, TaskDeadlineMonitor>();
         services.AddScoped<INotificationQueryService, NotificationQueryService>();

@@ -289,7 +289,10 @@ public class ProjectConfiguration : IEntityTypeConfiguration<Project>
         b.Property(p => p.Code).HasMaxLength(20).IsRequired();
         b.Property(p => p.Description).HasMaxLength(2000);
         b.Property(p => p.ClientName).HasMaxLength(150);
-        b.Property(p => p.RepositoryUrl).HasMaxLength(500);
+        b.Property(p => p.BackendRepositoryUrl).HasMaxLength(500);
+        b.Property(p => p.FrontendRepositoryUrl).HasMaxLength(500);
+        b.Property(p => p.LogoStoredFileName).HasMaxLength(100);
+        b.Property(p => p.LogoContentType).HasMaxLength(50);
         b.Property(p => p.DesignUrl).HasMaxLength(500);
         b.Property(p => p.DocsUrl).HasMaxLength(500);
         b.HasIndex(p => p.Code).IsUnique();
@@ -468,5 +471,103 @@ public class AuditLogConfiguration : IEntityTypeConfiguration<AuditLog>
         b.HasIndex(a => new { a.EntityName, a.EntityId });
         b.HasIndex(a => a.CreatedAt);
         b.HasIndex(a => a.UserId);
+    }
+}
+
+public class ClientConfiguration : IEntityTypeConfiguration<Client>
+{
+    public void Configure(EntityTypeBuilder<Client> b)
+    {
+        b.ToTable("Clients");
+        b.Property(c => c.Name).HasMaxLength(150).IsRequired();
+        b.Property(c => c.NameAr).HasMaxLength(150);
+        b.Property(c => c.ContactName).HasMaxLength(150);
+        b.Property(c => c.Phone).HasMaxLength(30);
+        b.Property(c => c.Notes).HasMaxLength(2000);
+        b.HasIndex(c => c.UserId).IsUnique();
+        b.HasIndex(c => c.Name);
+        b.HasOne(c => c.User).WithMany().HasForeignKey(c => c.UserId).OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public class ClientProjectConfiguration : IEntityTypeConfiguration<ClientProject>
+{
+    public void Configure(EntityTypeBuilder<ClientProject> b)
+    {
+        b.ToTable("ClientProjects");
+        b.HasIndex(x => new { x.ClientId, x.ProjectId }).IsUnique();
+        b.HasOne(x => x.Client).WithMany(c => c.Projects).HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.Cascade);
+        b.HasOne(x => x.Project).WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+public class ClientProjectNoteConfiguration : IEntityTypeConfiguration<ClientProjectNote>
+{
+    public void Configure(EntityTypeBuilder<ClientProjectNote> b)
+    {
+        b.ToTable("ClientProjectNotes");
+        b.Property(n => n.Content).HasMaxLength(4000).IsRequired();
+        b.HasOne(n => n.ClientProject).WithMany(p => p.Notes).HasForeignKey(n => n.ClientProjectId).OnDelete(DeleteBehavior.Cascade);
+        b.HasOne(n => n.CreatedBy).WithMany().HasForeignKey(n => n.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public class SupportTicketConfiguration : IEntityTypeConfiguration<SupportTicket>
+{
+    public void Configure(EntityTypeBuilder<SupportTicket> b)
+    {
+        b.ToTable("SupportTickets");
+        b.Property(t => t.Title).HasMaxLength(200).IsRequired();
+        b.Property(t => t.Description).HasMaxLength(8000).IsRequired();
+        b.HasIndex(t => new { t.ClientId, t.Status });
+        b.HasIndex(t => new { t.Status, t.LastActivityAt });
+        b.HasIndex(t => t.AssignedToUserId);
+        b.HasOne(t => t.Client).WithMany(c => c.Tickets).HasForeignKey(t => t.ClientId).OnDelete(DeleteBehavior.Cascade);
+        b.HasOne(t => t.Project).WithMany().HasForeignKey(t => t.ProjectId).OnDelete(DeleteBehavior.SetNull);
+        b.HasOne(t => t.CreatedBy).WithMany().HasForeignKey(t => t.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne(t => t.AssignedTo).WithMany().HasForeignKey(t => t.AssignedToUserId).OnDelete(DeleteBehavior.SetNull);
+    }
+}
+
+public class TicketMessageConfiguration : IEntityTypeConfiguration<TicketMessage>
+{
+    public void Configure(EntityTypeBuilder<TicketMessage> b)
+    {
+        b.ToTable("TicketMessages");
+        b.Property(m => m.Content).HasMaxLength(8000).IsRequired();
+        b.HasIndex(m => new { m.TicketId, m.CreatedAt });
+        b.HasOne(m => m.Ticket).WithMany(t => t.Messages).HasForeignKey(m => m.TicketId).OnDelete(DeleteBehavior.Cascade);
+        b.HasOne(m => m.User).WithMany().HasForeignKey(m => m.UserId).OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public class TicketAttachmentConfiguration : IEntityTypeConfiguration<TicketAttachment>
+{
+    public void Configure(EntityTypeBuilder<TicketAttachment> b)
+    {
+        b.ToTable("TicketAttachments");
+        b.Property(a => a.FileName).HasMaxLength(255).IsRequired();
+        b.Property(a => a.StoredFileName).HasMaxLength(100).IsRequired();
+        b.Property(a => a.ContentType).HasMaxLength(150).IsRequired();
+        b.HasIndex(a => a.StoredFileName).IsUnique();
+        b.HasOne(a => a.Ticket).WithMany(t => t.Attachments).HasForeignKey(a => a.TicketId).OnDelete(DeleteBehavior.Cascade);
+        b.HasOne(a => a.Message).WithMany(m => m.Attachments).HasForeignKey(a => a.MessageId).OnDelete(DeleteBehavior.SetNull);
+        b.HasOne(a => a.UploadedBy).WithMany().HasForeignKey(a => a.UploadedByUserId).OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public class CompanyTemplateConfiguration : IEntityTypeConfiguration<CompanyTemplate>
+{
+    public void Configure(EntityTypeBuilder<CompanyTemplate> b)
+    {
+        b.ToTable("CompanyTemplates");
+        b.Property(t => t.Title).HasMaxLength(200).IsRequired();
+        b.Property(t => t.Description).HasMaxLength(1000);
+        b.Property(t => t.FileName).HasMaxLength(255).IsRequired();
+        b.Property(t => t.StoredFileName).HasMaxLength(100).IsRequired();
+        b.Property(t => t.ContentType).HasMaxLength(150).IsRequired();
+        b.HasIndex(t => t.StoredFileName).IsUnique();
+        b.HasIndex(t => t.Category);
+        b.HasOne(t => t.UploadedBy).WithMany().HasForeignKey(t => t.UploadedByUserId).OnDelete(DeleteBehavior.Restrict);
     }
 }

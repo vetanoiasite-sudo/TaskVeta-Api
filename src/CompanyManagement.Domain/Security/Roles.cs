@@ -14,6 +14,12 @@ public static class Roles
     /// or a team leader, so they can assign and review tasks for their own members whatever their role.
     /// </summary>
     public const string Leader = "Leader";
+
+    /// <summary>
+    /// A customer's account (not an employee). Not assignable from the Users page: client accounts are created from the
+    /// Clients page. Clients only reach the client portal (their tickets and their projects).
+    /// </summary>
+    public const string Client = "Client";
 }
 
 /// <summary>Fine-grained permissions. Each maps to an authorization policy of the same name.</summary>
@@ -47,13 +53,19 @@ public static class Permissions
     public const string ReportsView = "reports.view";
     public const string ReportsExport = "reports.export";
     public const string AuditView = "audit.view";
+    /// <summary>Create client accounts, link company projects to clients and keep per-client project notes.</summary>
+    public const string ClientsManage = "clients.manage";
+    /// <summary>See and answer every client support ticket.</summary>
+    public const string SupportManage = "support.manage";
+    /// <summary>Upload and delete company templates (everyone can read them).</summary>
+    public const string TemplatesManage = "templates.manage";
 
     public static readonly string[] All =
     [
         UsersManage, RolesManage, SettingsManage, DepartmentsManage, TeamsManage, EmployeesView, EmployeesManage,
         AttendanceSelf, AttendanceViewTeam, AttendanceViewAll, AttendanceCorrect, AttendanceKiosk, LeaveApprove,
         HolidaysManage, TasksAssign, TasksReview, TasksViewAll, ProjectsManage, ProjectsCreate, SprintsManage, TaskReviewsView,
-        ReportsView, ReportsExport, AuditView
+        ReportsView, ReportsExport, AuditView, ClientsManage, SupportManage, TemplatesManage
     ];
 
     public static readonly IReadOnlyDictionary<string, string[]> ByRole = new Dictionary<string, string[]>
@@ -63,15 +75,17 @@ public static class Permissions
         [
             DepartmentsManage, TeamsManage, EmployeesView, EmployeesManage, AttendanceSelf, AttendanceViewTeam,
             AttendanceViewAll, AttendanceCorrect, AttendanceKiosk, LeaveApprove, HolidaysManage, TasksAssign,
-            TasksReview, TasksViewAll, ProjectsManage, ProjectsCreate, SprintsManage, TaskReviewsView, ReportsView, ReportsExport, AuditView
+            TasksReview, TasksViewAll, ProjectsManage, ProjectsCreate, SprintsManage, TaskReviewsView, ReportsView, ReportsExport, AuditView,
+            ClientsManage, SupportManage, TemplatesManage
         ],
         [Roles.Manager] =
         [
             EmployeesView, AttendanceSelf, AttendanceViewTeam, LeaveApprove, TasksAssign, TasksReview, TaskReviewsView, ReportsView,
-            ProjectsCreate, SprintsManage
+            ProjectsCreate, SprintsManage, SupportManage, TemplatesManage
         ],
         [Roles.Employee] = [AttendanceSelf],
-        [Roles.Leader] = [TasksAssign, TasksReview, TaskReviewsView, ProjectsCreate, SprintsManage],
+        [Roles.Leader] = [TasksAssign, TasksReview, TaskReviewsView, ProjectsCreate, SprintsManage, TemplatesManage],
+        [Roles.Client] = [],
     };
 
     public static IEnumerable<string> ForRoles(IEnumerable<string> roles) =>

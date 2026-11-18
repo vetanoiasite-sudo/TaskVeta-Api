@@ -9,6 +9,11 @@ public class ApplicationUser : IdentityUser<int>, IAuditableEntity
     public bool IsActive { get; set; } = true;
     public string PreferredLanguage { get; set; } = "en";
     public DateTime? LastLoginAt { get; set; }
+    /// <summary>
+    /// Set when the account was given a temporary password (client accounts). Until the user picks their own password,
+    /// the API only allows the auth endpoints.
+    /// </summary>
+    public bool MustChangePassword { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 

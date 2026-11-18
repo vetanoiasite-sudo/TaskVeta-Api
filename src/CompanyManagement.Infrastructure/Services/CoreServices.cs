@@ -20,6 +20,8 @@ public static class AppClaims
     public const string Permission = "permission";
     /// <summary>Set to "Claude" on requests authenticated with a personal key (the MCP endpoint).</summary>
     public const string Via = "via";
+    /// <summary>"1" while the account still has a temporary password; only the auth endpoints are allowed then.</summary>
+    public const string MustChangePassword = "pwd_change";
 }
 
 public class CurrentUser(IHttpContextAccessor accessor) : ICurrentUser

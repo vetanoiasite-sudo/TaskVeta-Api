@@ -178,6 +178,7 @@ try
 
     app.UseCors();
     app.UseAuthentication();
+    app.UseAccountGate(); // temporary passwords and client accounts are limited to their own endpoints
     app.UseRateLimiter(); // after authentication so policies can partition by user
     app.UseAuthorization();
 

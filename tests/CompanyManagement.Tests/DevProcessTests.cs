@@ -82,7 +82,7 @@ public partial class DevProcessTests
             var clock = new FakeClock(w.Time);
             Notifications = new NotificationService(Db, new NullRealtime(), NullLogger<NotificationService>.Instance);
             Tasks = new TaskService(Db, scope, access, user, clock, new NoAudit(), Notifications, new NullStorage());
-            Projects = new ProjectService(Db, new NoAudit(), Tasks, access, Notifications, user);
+            Projects = new ProjectService(Db, new NoAudit(), Tasks, access, Notifications, user, w.Files);
             Sprints = new SprintService(Db, Tasks, new NoAudit(), user, clock);
             Documents = new ProjectDocumentService(Db, Tasks, access, user, w.Files, new DocumentTextExtractor(NullLogger<DocumentTextExtractor>.Instance), new NoAudit());
             Keys = new PersonalKeyService(Db, user, new TokenService(Microsoft.Extensions.Options.Options.Create(new JwtOptions { SigningKey = new string('k', 40) }), w.Time),
